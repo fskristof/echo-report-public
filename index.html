@@ -12,10 +12,12 @@
 <!-- the echo calculator's reference pages, wiki and valve list (copied by sync_calculator.py) -->
 <link rel="stylesheet" href="calc/calc.css">
 <style>
-  /* the page's font: shipped with the program (web/fonts/, licence: Selawik-LICENSE.txt); 500 uses Regular, 800 Bold */
-  @font-face { font-family: "Selawik"; src: url("fonts/Selawik-Regular.woff2") format("woff2"); font-weight: 400; font-display: block; }
-  @font-face { font-family: "Selawik"; src: url("fonts/Selawik-Semibold.woff2") format("woff2"); font-weight: 600; font-display: block; }
-  @font-face { font-family: "Selawik"; src: url("fonts/Selawik-Bold.woff2") format("woff2"); font-weight: 700; font-display: block; }
+  /* the page's font: Open Sans (web/fonts/, licence: OpenSans-LICENSE.txt), one variable file with every weight and
+     width; used at 95 % width (the user's choice 2026-10-09: compact like Segoe UI) */
+  @font-face { font-family: "Open Sans"; src: url("fonts/OpenSans-wdth-wght.woff2") format("woff2");
+               font-weight: 300 800; font-stretch: 75% 100%; font-display: block; }
+  html { font-stretch: 95%; }
+  input, select, textarea, button { font-family: inherit; font-stretch: inherit; }   /* every box in the same font */
   /* ---------- Colours (Apple system palette), light and dark ---------- */
   :root {
     --bg: #f2f2f7; --card: #ffffff; --card-2: #f7f7fa; --edge: rgba(0, 0, 0, .05);
@@ -33,12 +35,11 @@
     --spring: linear(0, .186 10%, .465 20%, .682 30%, .821 40%, .903 50%, .949 60%,
                      .973 70%, .986 80%, .993 90%, 1);
     --spring-time: .5s;
-    /* ONE font on every computer (2026-10-09): Selawik, Microsoft's open twin of Segoe UI (web/fonts/), shipped with the
-       page. With each computer's own font (San Francisco on a Mac, Segoe on Windows, DejaVu on Linux) the letters had
-       different widths and the PISA blocks lined up on one computer but not on another. Missing signs (→ ≥) come from
-       the system fonts after it. */
-    --font: "Selawik", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    --font-display: "Selawik", "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    /* ONE font on every computer (2026-10-09): Open Sans at 95 % width, shipped with the page (web/fonts/). With each
+       computer's own font (San Francisco on a Mac, Segoe on Windows, DejaVu on Linux) the letters had different widths
+       and the PISA blocks lined up on one computer but not on another. Missing signs (→ ✓) come from the fonts after it. */
+    --font: "Open Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: "Open Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
     /* the echo calculator's colour names (its tables, wiki pages and badges use them: web/calc/) */
     --text-main: var(--text); --text-sub: var(--muted); --text-placeholder: var(--faint);
@@ -723,7 +724,7 @@
     .bar { background: var(--bg); }
   }
 </style>
-<meta name="echocore-version" content="85881c2, 2026-10-09">
+<meta name="echocore-version" content="51f3a04, 2026-10-09">
 <script src="pyodide/pyodide.js"></script>
 <script src="static-api.js"></script>
 </head>
@@ -1661,7 +1662,7 @@ function fitBlocks() {
 }
 let fitTimer = null;
 window.addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(refit, 100); });
-// the font (Selawik) may arrive after the first measuring: measure again once it is there
+// the font (Open Sans) may arrive after the first measuring: measure again once it is there
 if (document.fonts) document.fonts.ready.then(() => { if (typeof refit === "function") refit(); });
 
 const cellKeys = (s) => !s || s.badgeOf ? [] : typeof s === "string" ? [s] : Array.isArray(s) ? s.flatMap(cellKeys)
