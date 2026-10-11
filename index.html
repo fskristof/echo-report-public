@@ -566,6 +566,18 @@
                 gap: 3px; padding: 6px; border-radius: 10px; background: var(--card);
                 box-shadow: 0 6px 24px rgba(0,0,0,.18), 0 0 0 1px var(--sep); }
   .grade-menu.hidden { display: none; }
+  /* a small calculator window next to a box (FAC from RVEDA / RVESA): on top of everything, fixed to the screen */
+  .calc-pop { position: fixed; z-index: 60; padding: 10px 12px 12px; border-radius: 12px; background: var(--card);
+              box-shadow: 0 10px 32px rgba(0,0,0,.22), 0 0 0 1px var(--sep); }
+  .calc-pop.hidden { display: none; }
+  .calc-pop-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; font-size: .8125rem; font-weight: 700; }
+  .calc-pop-head button { margin-left: auto; width: 22px; height: 22px; padding: 0; border-radius: 6px; background: var(--fill);
+                          color: var(--muted); font-size: .875rem; line-height: 1; }
+  .calc-pop-body { display: grid; grid-template-columns: auto auto auto; row-gap: 6px; }
+  .calc-pop-body > .cell { grid-column: 1 / -1; }
+  .calc-pop-body .cell-label { font-size: .8125rem; font-weight: 700; }
+  .calc-pop-note { margin-top: 8px; font-size: .75rem; color: var(--muted); white-space: nowrap; }
+  button.act.calc-open { margin: 0 0 0 4px; }
   button.grade-opt { font-size: .8125rem; padding: 4px 10px; border-radius: 7px; background: var(--fill-2); color: var(--text);
                      white-space: nowrap; }
   button.grade-opt:hover, button.grade-opt.on { background: var(--accent); color: #fff; }
@@ -724,7 +736,7 @@
     .bar { background: var(--bg); }
   }
 </style>
-<meta name="echocore-version" content="c09dcb3, 2026-10-09">
+<meta name="echocore-version" content="73bfe7f, 2026-10-11">
 <script src="pyodide/pyodide.js"></script>
 <script src="static-api.js"></script>
 </head>
@@ -1001,6 +1013,7 @@ const state = { transcript: "", aiFlags: [], liveFlags: [], dismissed: new Set()
                 autoFlags: [],     // fixes applied automatically (e.g. DT 2,14 → 214), each can be undone
                 corrections: [],   // "MI: gr. I → gr. II": corrections said while dictating (Módosítások)
                 dictated: {},      // key -> the dictated value, kept while "Számol" shows the calculated one
+                blanked: new Set(),  // calculated boxes you emptied: sent as "" so the report leaves them out too
                 patient: { name: "", taj: "" },   // Fejléc name + TAJ: for the saved reports list only
                 savedSnapshot: "" };              // the boxes as last saved (or as opened): changed since?
 
@@ -1087,7 +1100,8 @@ function showResult(s) {
   hide("progress"); show("result"); show("toolbar-result"); show("size");
   state.transcript = s.transcript;                  // what the AI got (checks use this)
   state.fullTranscript = s.full_transcript || s.transcript;   // incl. paused parts
-  state.dismissed = new Set(); state.edited = new Set(); state.fields = {};
+  state.dismissed = new Set(); state.edited = new Set(); state.fields = {}; state.blanked = new Set();
+  document.querySelectorAll(".calc-pop").forEach((p) => p.remove());   // the calculator windows of the last form
   state.autoFlags = []; state.dictated = {};
   state.aiFlags = s.form.flags.filter((f) => f.phase === "ai");   // from reading the AI's answer
   state.liveFlags = s.form.flags.filter((f) => f.phase !== "ai"); // redone after every edit
@@ -1215,6 +1229,8 @@ const MORE = (...cells) => ({ offpage: true, more: true, cells });   // a line o
 const F = (...keys) => ({ flow: keys });
 const P3 = (a, b, c, label) => ({ pair: [a, b, c], seps: ["/", "="], label, unitLast: true });   // X / X = X %
 const PV = (...lines) => ({ prosthetic: lines });
+const POP = (key, inputs, note) => ({ key, popup: inputs, note });   // a box with a calculator button on its right:
+                                                                     // its inputs in a small window (FAC: RVEDA, RVESA)
 const CAP = (text, cols, gap) => ({ caption: text, cols, gap });   // a small title over the first `cols` columns of a
                                                                    // block ("PISA"); gap: the room after those columns
 const BADGE = (key) => ({ badgeOf: key });   // a box's severity badge in its own place (the gradient's: under
@@ -1236,7 +1252,10 @@ const LAYOUT = {
                 G([P("e_wave", "a_wave", "/", "E / A", { noUnit: true }), "ea_ratio", "dt", "l_wave"]),   // L hullám: a tick, after DT
                 G(H("Mitralis annulus lateralis TDI", "tdi_lat_s", "tdi_lat_e", "tdi_lat_a", "tdi_lat_ee"),
                   H("Mitralis annulus medialis TDI", "tdi_med_s", "tdi_med_e", "tdi_med_a", "tdi_med_ee"))],
-  "Jobb kamra": [GAPS(["102px"], [P("rv_edd", "rv_esd", "/", "RV EDD / ESD"), "fac"], ["tapse", "tric_smax"]),
+  // FAC: the calculator button after "%" opens RVEDA / RVESA (page only; 2026-10-11)
+  "Jobb kamra": [GAPS(["102px"], [P("rv_edd", "rv_esd", "/", "RV EDD / ESD"),
+                                  POP("fac", ["rv_eda", "rv_esa"], "FAC = (RVEDA − RVESA) / RVEDA × 100")],
+                      ["tapse", "tric_smax"]),
                  SUB("3D volumetria", C("rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"))],   // closed unless it has a value
   "Pitvarok": [GAPS(["126px"], [P("la_1", "la_2", "×", "Bal pitvar"), P("ra_1", "ra_2", "×", "Jobb pitvar")]),
                // LAV | LAVi in the middle | LARes, the row ending under Jobb pitvar's end (its own gaps: the
@@ -1268,7 +1287,10 @@ const LAYOUT = {
                           ["ar_rad", "ar_vmax", "ar_vc"], ["ar_ero", "ar_vti", "ar_pht"], ["ar_regvol", "ar_avel", "ao_desc_rev"],
                           ["ar_regfrac"]),
                       "text"],
-  "Pulmonalis billentyű": [["pi", "pulm_acc", "rvot_vti"], "text"],   // the text under PI, as in the report
+  // PI · ED vel. · APdiast (calculated from ED vel.; the report adds the RAP) · Pulm. acc. idő on the right; under it
+  // RVOT Diam · RVOT VTI · Qp/Qs (2026-10-11); the text under them, as in the report
+  // (two blocks: sharing columns made the PI row ~45 px too wide for the card)
+  "Pulmonalis billentyű": [G(["pi", "pi_ed_vel", "padp_grad", "pulm_acc"]), G(["rvot_diam", "rvot_vti", "qp_qs"]), "text"],
   "Pericardium": ["text", SUBC("Beáramlás ingadozás",
                                [P3("mv_resp_max", "mv_resp_min", "mv_resp_var", "Mitrális"),
                                 P3("tv_resp_max", "tv_resp_min", "tv_resp_var", "Tricuspidalis")])],
@@ -1281,7 +1303,8 @@ const SHORT_LABELS = { mv_grad: "MV átlag grad.",                   // too long
   device_2: "Eszköz", device_2_flow: "Flow", device_2_rpm: "RPM",     // 2nd / 3rd device: the same labels
   device_3: "Eszköz", device_3_flow: "Flow", device_3_rpm: "RPM",
   ao_desc_rev: "Ao. desc. rev. flow",
-  dvi: "DVI (VTI)", av_et: "ET",                   // "ejekciós idő" on hover
+  dvi: "DVI (VTI)", av_et: "ET",
+  pi_ed_vel: "ED vel.",                            // next to PI: the PI end-diastolic velocity                   // "ejekciós idő" on hover
   tdi_lat_s: "S", tdi_lat_e: "E'", tdi_lat_a: "A'", tdi_lat_ee: "E/E'",   // the line's title says the rest
   tdi_med_s: "S", tdi_med_e: "E'", tdi_med_a: "A'", tdi_med_ee: "E/E'",
   lv3d_ef: "EF", lv3d_edv: "EDV", lv3d_esv: "ESV", lv3d_sv: "SV", lv_sv: "SV",   // the "2D:" / "3D:" title says the rest
@@ -1668,7 +1691,8 @@ if (document.fonts) document.fonts.ready.then(() => { if (typeof refit === "func
 const cellKeys = (s) => !s || s.badgeOf ? [] : typeof s === "string" ? [s] : Array.isArray(s) ? s.flatMap(cellKeys)
                         : s.flow ? s.flow : s.pair || [s.key];
 const lineKeys = (l) => l === "text" || l.caption ? [] : l.group ? l.group.flatMap(lineKeys) : l.sub ? l.lines.flatMap(lineKeys)
-                        : l.prosthetic ? l.prosthetic.flatMap(lineKeys) : (Array.isArray(l) ? l : l.cells).flatMap(cellKeys);
+                        : l.prosthetic ? l.prosthetic.flatMap(lineKeys)
+                        : (Array.isArray(l) ? l : l.cells).flatMap((c) => [...cellKeys(c), ...((c && c.popup) || [])]);
 const flatLines = (lines) => lines.flatMap((l) => l === "text" ? [] : l.sub ? flatLines(l.lines)
                                               : l.prosthetic ? flatLines(l.prosthetic) : l.group ? l.group : [l]);
 
@@ -1905,9 +1929,75 @@ function makeCell(spec, byKey, choices, flags) {
     body.appendChild(place);
     Object.assign(state.fields[fields[0].key], { badge, ghost });
   }
+  if (spec.popup) body.appendChild(makeCalcPopup(spec, byKey, choices, flags, fields[0]));   // FAC: its calculator
   if (spec.iconAfter) { body.appendChild(act); cell.append(body, notes); }   // the icon after the unit (PASP),
   else cell.append(act, body, notes);                                          // so the label stays by its box
   return cell;
+}
+
+/* The calculator button right of a box (POP in the layout; FAC, 2026-10-11): a click opens a small window next to the
+   box with the boxes of its inputs (RVEDA, RVESA). They are ordinary boxes: typed values go to the server, which
+   calculates the box as always (template.md 4.13). The window hangs on the page itself (fixed), so no card cuts it off;
+   it closes with ×, Esc, Enter or a click elsewhere. */
+const CALC_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+                  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/>' +
+                  '<path d="M8.5 7h7M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/></svg>';
+function makeCalcPopup(spec, byKey, choices, flags, target) {
+  const inputs = spec.popup.filter((k) => byKey[k]);
+  const title = `${target.label} számolása`;
+  const btn = el("button", "act calc-open");
+  btn.type = "button";
+  btn.innerHTML = CALC_ICON;
+  btn.title = `${title} (${inputs.map((k) => byKey[k].label).join(", ")})`;
+  btn.setAttribute("aria-label", btn.title);
+  btn.setAttribute("aria-expanded", "false");
+  const pop = el("div", "calc-pop hidden");
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", title);
+  const head = el("div", "calc-pop-head", title), x = el("button", "", "×");
+  x.type = "button";
+  x.setAttribute("aria-label", "Bezárás");
+  head.appendChild(x);
+  const grid = el("div", "calc-pop-body");
+  for (const k of inputs) {
+    const c = makeCell(k, byKey, choices, flags);
+    c.dataset.always = "1";
+    grid.appendChild(c);
+  }
+  pop.append(head, grid);
+  if (spec.note) pop.appendChild(el("div", "calc-pop-note", spec.note));
+  document.body.appendChild(pop);                   // (removed when the form is built again: showResult)
+
+  const place = () => {                             // right of the button; on the left of the box when there is no room
+    const r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    let left = r.right + 8;
+    if (left + w > innerWidth - 8) left = Math.max(8, state.fields[target.key].input.getBoundingClientRect().left - w - 8);
+    pop.style.left = left + "px";
+    pop.style.top = Math.max(8, Math.min(r.top - 10, innerHeight - h - 8)) + "px";
+  };
+  const isOpen = () => !pop.classList.contains("hidden");
+  const close = (focusBtn) => {
+    if (!isOpen()) return;
+    pop.classList.add("hidden");
+    btn.setAttribute("aria-expanded", "false");
+    if (focusBtn) btn.focus();
+  };
+  const open = () => {
+    pop.classList.remove("hidden");
+    btn.setAttribute("aria-expanded", "true");
+    place();
+    const first = state.fields[inputs[0]];
+    if (first) first.input.focus();
+  };
+  btn.addEventListener("click", () => (isOpen() ? close(false) : open()));
+  x.addEventListener("click", () => close(true));
+  pop.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); close(true); } });
+  document.addEventListener("mousedown", (e) => {
+    if (pop.isConnected && isOpen() && !pop.contains(e.target) && !btn.contains(e.target)) close(false);
+  });
+  addEventListener("scroll", () => { if (pop.isConnected && isOpen()) place(); }, true);
+  addEventListener("resize", () => { if (pop.isConnected && isOpen()) place(); });
+  return btn;
 }
 
 // The badge of a box shown in its own place (BADGE in the layout): as wide as nothing, so it never
@@ -1927,7 +2017,7 @@ function makeBadgeCell(key) {
 /* The ƒx / mic room before these boxes is there only while an icon shows: without one the box closes up to its
    label (2026-10-08). The MVAs share their columns with MV VTI (CW) / MV PHT above them, so those move along and stay
    lined up. The EFs: the room the icon would take goes after the box instead, so EDV never moves. */
-const FOLD_ACT = new Set(["bsa", "lavi", "mva_pht", "mva_vti", "av_at_et"]);
+const FOLD_ACT = new Set(["bsa", "lavi", "mva_pht", "mva_vti", "av_at_et", "fac"]);
 const EF_ACT = new Set(["ef", "lv3d_ef", "rv3d_ef"]);
 function refreshActRoom(field) {
   const act = field.cell.querySelector(".cell-act.fold");
@@ -2011,6 +2101,10 @@ function makeSlot(f, choices, { cell, act, notes, flags, unit, prefix }) {
   input.id = "f-" + f.key; input.value = f.kind === "grade" ? gradeInBox(f.value) : f.value;
   if (prefix) input.setAttribute("aria-label", f.label);
   input.addEventListener("input", () => {
+    // a calculated value deleted (2026-10-11: a deleted SVi came back in the report): it stays out until ƒx
+    const wasCalc = slot.classList.contains("calc") && !state.edited.has(f.key);
+    if (!input.value.trim() && (wasCalc || state.blanked.has(f.key))) state.blanked.add(f.key);
+    else state.blanked.delete(f.key);
     markTyped(f.key);
     if (f.key === "pvl") refreshPvl();
     if (isTick) slot.classList.toggle("empty", !input.checked);       // counts as filled only while ticked
@@ -2038,6 +2132,7 @@ function makeSlot(f, choices, { cell, act, notes, flags, unit, prefix }) {
 
   const field = { slot, row: slot, cell, input, label: f.label, calcBtn, revertBtn, flagsEl: flags };
   state.fields[f.key] = field;
+  if (f.blank) state.blanked.add(f.key);     // emptied by hand before (a saved report): stays empty
   setCalcLook(field, f.calculated, f.inputs);
   updateCalcButton(f.key, f.calc_value, f.calc_inputs, f.calculated);
   return slot;
@@ -2606,6 +2701,7 @@ function boxesPayload() {                    // the boxes as they are now (what 
   for (const [key, f] of Object.entries(state.fields)) {
     const calculated = f.slot.classList.contains("calc") && !state.edited.has(key);
     if (!calculated && f.input.value.trim()) values[key] = f.input.value;   // calculated ones are redone
+    else if (state.blanked.has(key) && !f.input.value.trim()) values[key] = "";   // emptied by hand: left out
   }
   const texts = {};
   document.querySelectorAll("textarea.text[data-text-key]").forEach((ta) => { texts[ta.dataset.textKey] = ta.value; });
@@ -2717,6 +2813,7 @@ function useCalculated(key) {
   const field = state.fields[key];
   if (field.input.value.trim()) state.dictated[key] = field.input.value.trim();   // for "Diktált: …"
   state.edited.delete(key);
+  state.blanked.delete(key);
   setCalcLook(field, true);                  // its inputs are shown after the recalculation
   field.calcBtn.classList.add("hidden");
   render();                                  // not sent as a value: the server calculates it
@@ -3001,7 +3098,7 @@ function snapshot() {
 }
 function hasContent() {
   const b = boxesPayload();
-  return Object.keys(b.values).length > 0 || Object.values(b.texts).some((t) => t.trim()) || !!b.egyeb.trim() ||
+  return Object.values(b.values).some((v) => v.trim()) || Object.values(b.texts).some((t) => t.trim()) || !!b.egyeb.trim() ||
          !!state.patient.name.trim() || !!state.patient.taj.trim();
 }
 function isDirty() {

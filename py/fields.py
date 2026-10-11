@@ -120,7 +120,10 @@ FIELDS = [
     Field("rv_edd", "RV EDD", "mm", "num", "1st number of 'jobb kamra X per Y'"),
     Field("rv_esd", "RV ESD", "mm", "num", "2nd number of 'jobb kamra X per Y'"),
     Field("tapse", "TAPSE", "mm", "num", "TAPSE"),
-    Field("fac", "FAC", "%", "num", "FAC"),
+    Field("fac", "FAC", "%", "num", "FAC", calc=0),     # calculated from RVEDA / RVESA (template.md 4.13)
+    # the FAC calculator's inputs (2026-10-11): typed in its little window on the page, never in the report
+    Field("rv_eda", "RVEDA", "cm2", "num", "RV end-diastolic area", ai=False),
+    Field("rv_esa", "RVESA", "cm2", "num", "RV end-systolic area", ai=False),
     Field("tric_smax", "Tricuspidalis Smax", "cm/s", "num", "tricuspidalis Smax, S max"),
     # RV 3D volumetry (2026-10-08, typed on the page only)
     Field("rv3d_ef", "RV EF", "%", "num", "RV 3D EF", calc=0, ai=False),
@@ -205,8 +208,14 @@ FIELDS = [
 
     # --- Pulmonalis billentyű ----------------------------------------------------------
     Field("pi", "PI", "", "grade", "PI, pulmonalis regurgitáció / insuff / regurg"),
+    # PI end-diastolic velocity -> APdiast = 4 x v2 (+ RAP in the report); RVOT -> Qp/Qs (2026-10-11, typed on the
+    # page only; template.md 4.12)
+    Field("pi_ed_vel", "PI ED vel.", "m/s", "num", "PI end-diastolic velocity", ai=False),
+    Field("padp_grad", "APdiast", "Hgmm", "num", "PI end-diastolic gradient (the X of 'APdiast X+RAP')", calc=0, ai=False),
     Field("pulm_acc", "Pulm. acc. idő", "ms", "num", "pulmonalis acceleration time", ai=False),
+    Field("rvot_diam", "RVOT Diam", "mm", "num", "RVOT diam", ai=False),
     Field("rvot_vti", "RVOT VTI", "cm", "num", "RVOT VTI", ai=False),
+    Field("qp_qs", "Qp/Qs", "", "num", "Qp/Qs, shunt ratio", calc=2, ai=False),
 
     # --- Pericardium: respiratory variation of the inflow (typed on the page; template.md 4.9)
     Field("mv_resp_max", "Mitrális beáramlás max", "cm/s", "num", "mitral inflow max", ai=False),

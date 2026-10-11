@@ -79,7 +79,11 @@ LABELS = {
         "AV grad": ("pair", "av_grad_peak", "av_grad_mean", "/"), "AV grad (mean)": ("field", "av_grad_mean"),
         **_pisa("ar", "AR"),
     },
-    "Pulmonalis billentyű": _plain("pi", "pulm_acc", "rvot_vti"),
+    "Pulmonalis billentyű": {
+        **_plain("pi", "pulm_acc", "rvot_diam", "rvot_vti", "qp_qs"),
+        "ED vel.": ("field", "pi_ed_vel"),                  # (the report's short label for PI ED vel.)
+        "APdiast": ("padp",),                               # gradient + RAP: the RAP is APsyst's, read there
+    },
     "Pericardium": {},
 }
 
@@ -168,6 +172,9 @@ class Reader:
             else:
                 self.reject(label, value, section)
             return
+        if kind == "padp":
+            m = re.fullmatch(rf"({NUM})\s*\+\s*(?:{NUM})?\s*Hgmm", value)
+            return self.put("padp_grad", m.group(1)) if m else self.reject(label, value, section)
         if kind == "pasp":
             m = re.fullmatch(rf"({NUM})\s*\+\s*({NUM})?\s*Hgmm", value)
             if not m:

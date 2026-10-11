@@ -74,11 +74,12 @@ class Profile:
 
 # old layout (70 characters wide, fixed-width font; the default, what the tests check)
 COLS_70 = dict(hdr=(0, 16, 32, 48), lv=(0, 20, 46), ef=(0, 16, 32, 48), ef5=(0, 16, 29, 42, 57), rv3d=(0, 17, 33, 49), dt=24, rv=32, atria=28, three=(0, 19, 43),
-               pisa2=27, pisa_indent=9, right=45, mva2=46, av=(0, 18, 40), pvl=56, lvot=27)
+               pisa2=27, pisa_indent=9, right=45, mva2=46, av=(0, 18, 40), pvl=56, lvot=27, pulm=(0, 18, 36, 50))
 # the Leírás box: more room, so the numbers of one measurement stay close (PISA) and the different measurements
-# (grade line, regurgitation numbers, flow) are further apart
+# (grade line, regurgitation numbers, flow) are further apart. PISA's 2nd column and the right column moved 4 to the
+# right (2026-10-11, the user: the two PISA columns were too close)
 COLS_WIDE = dict(hdr=(0, 20, 40, 60), lv=(0, 24, 52), ef=(0, 20, 40, 60), ef5=(0, 17, 31, 45, 60), rv3d=(0, 18, 34, 50), dt=30, rv=38, atria=34, three=(0, 22, 48),
-                 pisa2=27, pisa_indent=9, right=52, mva2=52, av=(0, 20, 48), pvl=64, lvot=30)
+                 pisa2=31, pisa_indent=9, right=56, mva2=52, av=(0, 20, 48), pvl=64, lvot=30, pulm=(0, 19, 38, 58))
 PROFILES = {"70": Profile("70", 70, COLS_70, sep_width=60),
             "KAEC": Profile("KAEC", 80, COLS_WIDE),
             "KARU": Profile("KARU", 78, COLS_WIDE, proportional=True)}
@@ -138,7 +139,7 @@ SECTION_NAMES = {"falmozgas": "falmozgás", "bal_kamra": "bal kamra", "jobb_kamr
 WHOLE_NUMBER_UNITS = {"mm", "ms", "cm/s", "Hgmm", "/min", "kg", "RPM", "%"}
 # Not checked at all: "cm" (LVOT VTI 21,5 cm), "ml" and "ml/m2" (volumes can have decimals;
 # a PISA VTI of "1,1" is caught by the range check instead), and these fields:
-DECIMALS_OK = {"lvot_diam", "mv_grad", "gls", "lares",   # LARes: a strain like GLS
+DECIMALS_OK = {"lvot_diam", "rvot_diam", "mv_grad", "gls", "lares",   # LARes: a strain like GLS
                "mr_rad", "tr_rad", "ar_rad"}             # PISA radius: 6,7 mm is normal
 # Usually whole, rarely not: a decimal gets a yellow "check", never a suggested fix.
 RARELY_DECIMAL = {"ef", "lv3d_ef", "rv3d_ef", "mr_vc", "tr_vc", "ar_vc"}
@@ -216,6 +217,7 @@ class Report:
         self.phase = "ai"         # flags from reading the AI's answer ("ai") or from the
                                   # checks that are redone after every edit ("live")
         self.find_heard_numbers()
+        self.blank = set()        # boxes emptied by hand on the page: their calculated value is not used (live_report)
         self.corrections = []     # "LV EDD: 52 → 48"
         self.egyeb = []           # lines for the "Egyéb" section
         self.texts = {}           # section -> free text
@@ -456,6 +458,8 @@ class Report:
         text = fmt(value, decimals)
         unit = FIELD[key].unit
         self.calc_options[key] = (text, inputs)
+        if key in self.blank:                    # you emptied this box: not written, not used further (ƒx still offers it)
+            return
         if key in self.values:
             dictated = self.num(key)
             if dictated is not None and value and abs(dictated - value) / abs(value) > 0.10:
@@ -510,6 +514,11 @@ class Report:
                 self.calc(sv, v(edv) - v(esv), inputs)
                 self.calc(ef, (v(edv) - v(esv)) / v(edv) * 100, inputs)
 
+        # 4.13 FAC from the RV areas (2026-10-11): (RVEDA - RVESA) / RVEDA x 100, only when RVEDA > RVESA
+        if v("rv_eda") and v("rv_esa") is not None and v("rv_eda") > v("rv_esa"):
+            self.calc("fac", (v("rv_eda") - v("rv_esa")) / v("rv_eda") * 100,
+                      f"RVEDA {self.values['rv_eda']} cm2, RVESA {self.values['rv_esa']} cm2")
+
         # 4.1 BSA (Mosteller). TM is stored in m.
         if v("ts") and v("tm") and v("ts") > 0 and v("tm") > 0:     # (a negative typed value: no square root)
             self.calc("bsa", math.sqrt(v("tm") * 100 * v("ts") / 3600),
@@ -547,6 +556,16 @@ class Report:
         if v("lvot_vti") and v("av_vti"):
             self.calc("dvi", v("lvot_vti") / v("av_vti"),
                       f"LVOT VTI {self.values['lvot_vti']} / AV VTI {self.values['av_vti']}")
+
+        # 4.12 Pulmonalis (2026-10-11): Qp/Qs = RVOT SV / LVOT SV (each = π × (Diam / 20)² × VTI);
+        # APdiast gradient = 4 × PI end-diastolic velocity² (RAP is added in the report, as for APsyst)
+        if sv_from_lvot and v("rvot_diam") and v("rvot_vti"):
+            rvot_sv = math.pi * (v("rvot_diam") / 20) ** 2 * v("rvot_vti")
+            self.calc("qp_qs", rvot_sv / sv_from_lvot,
+                      f"RVOT Diam {self.values['rvot_diam']} mm, RVOT VTI {self.values['rvot_vti']} cm, "
+                      f"LVOT Diam {self.values['lvot_diam']} mm, LVOT VTI {self.values['lvot_vti']} cm")
+        if v("pi_ed_vel"):
+            self.calc("padp_grad", 4 * v("pi_ed_vel") ** 2, f"PI ED vel. {self.values['pi_ed_vel']} m/s")
 
         # 4.8 From the echo calculator (inputs typed on the page)
         if v("mv_pht"):
@@ -617,7 +636,7 @@ class Report:
         if rap_option:
             self.calc_options["rap"] = rap_option
         self.rap_calculated = None
-        if "rap" not in self.values:
+        if "rap" not in self.values and "rap" not in self.blank:
             self.rap_calculated = rap_option
             if self.rap_calculated and "pasp_grad" in self.values:
                 rap, why = self.rap_calculated
@@ -677,6 +696,21 @@ class Report:
         if line:
             lines.append(line)
         return lines
+
+    def closeup(self, cols, cells):
+        """One row whose filled values close up to the left (2026-10-11, the user: "AV Vmax  AI" leaves no room for an
+        empty gradient). Each value goes to the first of `cols` it fits in after the one before it (at least 2 spaces
+        between), so full rows still line up in their usual columns; past the last column it simply follows."""
+        p = self.profile
+        placed, i, end = [], 0, None
+        for text in (c for c in cells if c):
+            if end is not None:
+                while i < len(cols) and end + 2 * p.space > cols[i]:
+                    i += 1
+            column = cols[i] if i < len(cols) else end + 2 * p.space
+            placed.append((column, text))
+            end, i = column + p.w(text), i + 1
+        return self.row(*placed)
 
     @staticmethod
     def stack(*parts):
@@ -775,10 +809,10 @@ class Report:
         on one row, under them the MVA from VTI (or a plain MVA) and the MVA from PHT. An empty row
         is left out; a plain MVA next to an MVA (VTI) gets its own row (nothing is dropped)."""
         mva_vti, mva = self.cell("mva_vti"), self.cell("mva")     # column 46: after "...gradiens: 12,5 Hgmm"
-        c2 = self.profile.cols["mva2"]
-        return (self.row((0, self.cell("mv_grad")), (c2, self.cell("mv_pht")))
-                + self.row((0, mva_vti or mva), (c2, self.cell("mva_pht")))
-                + (self.row((0, mva)) if mva_vti and mva else []))
+        # the PHT column moves to the left only as a whole, like the LVOT section (2026-10-11)
+        return (self.two_columns([self.cell("mv_grad"), mva_vti or mva], [self.cell("mv_pht"), self.cell("mva_pht")],
+                                 self.profile.cols["mva2"])
+                + ([mva] if mva_vti and mva else []))
 
     def resp_line(self, p, name):
         """'Mitrális beáramlás légzésszinkron ingadozás: 80/60=25%' (template.md 4.9)."""
@@ -793,6 +827,41 @@ class Report:
             return None
         rap = self.values.get("rap") or (self.rap_calculated[0] if self.rap_calculated else "")
         return f"APsyst: {self.values['pasp_grad']}+{rap} Hgmm"          # (PASP; the name since 2026-10-01)
+
+    def padp(self):
+        """'APdiast: 6+8 Hgmm': the PI end-diastolic gradient + the same RAP as APsyst (2026-10-11)."""
+        if "padp_grad" not in self.values:
+            return None
+        rap = self.values.get("rap") or (self.rap_calculated[0] if self.rap_calculated else "")
+        return f"APdiast: {self.values['padp_grad']}+{rap} Hgmm"
+
+    # the LVOT · AVA · SV · CO section: two columns, row by row (2026-10-11)
+    LVOT_LEFT = ("lvot_diam", "lvot_vti", "sv", "svi", "co", "ci")
+    LVOT_RIGHT = ("av_vti", "ava", "avai", "dvi", "av_at_et", "dvi_vmax")
+
+    def two_columns(self, left, right, column):
+        """Two columns of a part, row by row (2026-10-11; the LVOT section and the mitral stenosis). The right column
+        moves to the left only as a whole: when every value in it has an empty place on its left (in its own row).
+        Then it is one column, the values in their row order. Otherwise each column closes up by itself (no empty
+        rows in between: DVI right under AVA when AVAi is empty)."""
+        if all(not l for l, r in zip(left, right) if r):
+            return [r or l for l, r in zip(left, right) if r or l]
+        left, right = [x for x in left if x], [x for x in right if x]
+        lines = []
+        for i in range(max(len(left), len(right))):
+            lines += self.row((0, left[i] if i < len(left) else None), (column, right[i] if i < len(right) else None))
+        return lines
+
+    def lvot_rows(self):
+        return self.two_columns([self.cell(k) for k in self.LVOT_LEFT], [self.cell(k) for k in self.LVOT_RIGHT],
+                                self.profile.cols["lvot"])
+
+    def pulm_rows(self):
+        """PI · ED vel. · APdiast · Pulm. acc. idő, under it RVOT Diam · RVOT VTI · Qp/Qs (2026-10-11); each closes up."""
+        K = self.profile.cols["pulm"]
+        c = self.cell
+        return (self.closeup(K, [c("pi"), c("pi_ed_vel", "ED vel."), self.padp(), c("pulm_acc")])
+                + self.closeup(K, [c("rvot_diam"), c("rvot_vti"), c("qp_qs")]))
 
     def ea(self):
         e, a, r = (self.values.get(k) for k in ("e_wave", "a_wave", "ea_ratio"))
@@ -856,11 +925,11 @@ class Report:
         K = self.profile.cols
         wall_motion = self.free_text(self.texts.get("falmozgas"))
         remarks = self.free_text(self.texts.get("bal_kamra"))      # other LV remarks (thrombus, noncompaction...)
-        inflow = (self.row((0, self.ea()), (K["dt"], c("dt"))) + self.tdi_lines("lat", "lateralis")
+        inflow = (self.closeup((0, K["dt"]), [self.ea(), c("dt")]) + self.tdi_lines("lat", "lateralis")
                   + self.tdi_lines("med", "medialis"))
         blocks = [
             # Header
-            self.row(*zip(K["hdr"], (c("hr"), c("tm"), c("ts"), c("bsa"))))       # TM before TS (2026-10-08)
+            self.closeup(K["hdr"], [c("hr"), c("tm"), c("ts"), c("bsa")])          # TM before TS (2026-10-08)
             + self.devices(),
             # Bal kamra
             # one empty row between: the dimensions | the EF row + wall motion | other remarks | E/A, TDI (2026-10-07)
@@ -891,26 +960,19 @@ class Report:
             # Tricuspidalis billentyű
             self.stack(
                 self.morph_line("tv_morph") + self.free_text(self.texts.get("tricuspidalis"))
-                + self.row((0, c("ti")), (K["three"][1], self.pasp()),
-                           (K["three"][2], self.pair("ivc_max", "ivc_min", "IVC", "IVC min", "IVC", "/", "mm"))),
+                + self.closeup(K["three"], [c("ti"), self.pasp(),
+                                            self.pair("ivc_max", "ivc_min", "IVC", "IVC min", "IVC", "/", "mm")]),
                 self.regurgitation("tr", "TR", ["tr_vc"], "hep_flow")),
             # Aorta billentyű: text + grade line, the LVOT / AVA / SV / CO section, the regurgitation group (AR PISA, flow)
             self.stack(
                 self.morph_line("av_morph") + self.free_text(self.texts.get("aorta"))
-                + self.row((0, c("av_vmax")),
-                           (K["av"][1], self.pair("av_grad_peak", "av_grad_mean", "AV grad", "AV grad (mean)",
-                                          "AV grad", "/", "Hgmm")),
-                           (K["av"][2], c("ai")), (K["pvl"], c("pvl"))),   # PVL right after AI (prosthetic valve)
-                self.row((0, c("lvot_diam")), (K["lvot"], c("av_vti")))
-                + self.row((0, c("lvot_vti")), (K["lvot"], c("ava")))
-                + self.row((0, c("sv")), (K["lvot"], c("avai")))
-                + self.row((0, c("svi")), (K["lvot"], c("dvi")))
-                + self.row((0, c("co")), (K["lvot"], c("av_at_et")))     # AT/ET: prosthetic valve (template 4.8)
-                + self.row((0, c("ci")), (K["lvot"], c("dvi_vmax"))),    # DVI (Vmax) under DVI (2026-10-01)
+                + self.closeup((*K["av"], K["pvl"]),                     # PVL right after AI (prosthetic valve)
+                               [c("av_vmax"), self.pair("av_grad_peak", "av_grad_mean", "AV grad", "AV grad (mean)",
+                                                        "AV grad", "/", "Hgmm"), c("ai"), c("pvl")]),
+                self.lvot_rows(),                                        # AT/ET, DVI (Vmax): template 4.8
                 self.regurgitation("ar", "AR", ["ar_vc", "ar_pht"], "ao_desc_rev")),
             # Pulmonalis billentyű: PI first, its text after it (template)
-            self.row((0, c("pi")), (K["three"][1], c("pulm_acc")), (K["three"][2], c("rvot_vti")))
-            + self.free_text(self.texts.get("pulmonalis")),
+            self.pulm_rows() + self.free_text(self.texts.get("pulmonalis")),
             # Pericardium
             self.free_text(self.texts.get("pericardium"))
             + self.resp_line("mv", "Mitrális") + self.resp_line("tv", "Tricuspidalis"),
@@ -1117,7 +1179,7 @@ FORM_SECTIONS = [
                    "lv3d_ef", "lv3d_edv", "lv3d_esv", "lv3d_sv", "e_wave", "a_wave", "ea_ratio", "dt", "l_wave",
                    "tdi_lat_s", "tdi_lat_e", "tdi_lat_a", "tdi_lat_ee",
                    "tdi_med_s", "tdi_med_e", "tdi_med_a", "tdi_med_ee"], "falmozgas", False),
-    ("Jobb kamra", ["rv_edd", "rv_esd", "tapse", "fac", "tric_smax", "rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"], "jobb_kamra", False),
+    ("Jobb kamra", ["rv_edd", "rv_esd", "tapse", "fac", "rv_eda", "rv_esa", "tric_smax", "rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"], "jobb_kamra", False),
     ("Pitvarok", ["la_1", "la_2", "ra_1", "ra_2", "lares", "lavi", "lav"], "pitvarok", False),
     ("Mitrális billentyű", ["mv_morph", "mi", "mr_vc", "vena_pulm_flow", "mv_vti_pw", "mv_lvot_vti", "mv_vti_cw", *_pisa("mr"), "mv_grad", "mva_vti",
                             "mva", "mv_pht", "mva_pht"], "mitralis", True),
@@ -1127,7 +1189,8 @@ FORM_SECTIONS = [
                          "lvot_diam", "lvot_vti", "av_vti", "ava", "avai", "sv", "svi", "dvi",
                          "co", "ci", "lvot_vmax", "dvi_vmax", "av_at", "av_et", "av_at_et",
                          *_pisa("ar")], "aorta", True),
-    ("Pulmonalis billentyű", ["pi", "pulm_acc", "rvot_vti"], "pulmonalis", False),
+    ("Pulmonalis billentyű", ["pi", "pi_ed_vel", "padp_grad", "pulm_acc", "rvot_diam", "rvot_vti", "qp_qs"],
+     "pulmonalis", False),
     ("Pericardium", ["mv_resp_max", "mv_resp_min", "mv_resp_var", "tv_resp_max", "tv_resp_min", "tv_resp_var"],
      "pericardium", True),
     ("Vélemény", [], "velemeny", False),
@@ -1137,7 +1200,8 @@ NOT_IN_REPORT = {"cvp", "ventilated", "lav",  # inputs only (they decide RAP; LA
                  "supine", "afib", "pvc", "bedside", "suboptimal",   # header ticks: only the Vélemény generator
                  "l_wave",                                           # L hullám tick (E/A line): the same
 
-                 "mv_vti_pw", "mv_vti_cw", "lvot_vmax", "av_at", "av_et"}  # calculator, page only
+                 "mv_vti_pw", "mv_vti_cw", "lvot_vmax", "av_at", "av_et",   # calculator, page only
+                 "rv_eda", "rv_esa"}                                        # the FAC calculator's window
 
 
 def form_data(r):
@@ -1163,6 +1227,7 @@ def form_data(r):
                 "calc_value": r.calc_options.get(key, ("", ""))[0],
                 "calc_inputs": r.calc_options.get(key, ("", ""))[1],
                 "not_in_report": key in NOT_IN_REPORT,
+                "blank": key in r.blank,             # emptied by hand: the page keeps it empty
             })
         extra = EXTRA_TEXTS.get(title)                 # a second text box in the same card (typed on the page)
         sections.append({"title": title, "fields": fields, "text_key": text_key,
@@ -1175,7 +1240,9 @@ def form_data(r):
 
 def live_report(values, texts, egyeb, transcript, ai_texts=None, place=None):
     """The Report built from the page's boxes as edited (calculations and checks done).
-    Values marked as calculated are not sent, so they are recalculated here.
+    Values marked as calculated are not sent, so they are recalculated here. A calculable box sent EMPTY ("") was
+    emptied by hand (2026-10-11): its calculated value is then left out of the report and of further calculations
+    (before, deleting a calculated SVi brought it straight back).
     ai_texts: the text boxes as the AI first wrote them (the checks only compare the AI's own words)."""
     r = Report({"values": [], "texts": [], "corrections": [], "egyeb": []}, transcript)
     r.original_texts = ai_texts
@@ -1186,6 +1253,9 @@ def live_report(values, texts, egyeb, transcript, ai_texts=None, place=None):
         if key not in FIELD:
             continue
         value = (value or "").strip()
+        if not value and (FIELD[key].calc is not None or key == "rap"):
+            r.blank.add(key)
+            continue
         if FIELD[key].kind == "num":
             value = value.replace(".", ",")          # 2.5 -> 2,5
             value = value.rstrip(",")                # "1," while typing 1,5 is not an error yet
