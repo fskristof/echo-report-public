@@ -159,6 +159,12 @@ FIELDS = [
     Field("mva_pht", "MVA (PHT)", "cm2", "num", "MVA PHT", calc=2),
     Field("mv_pht", "MV PHT", "ms", "num", "mitrális PHT, MV PHT"),
     Field("mva", "MVA", "cm2", "num", "'MVA' when neither VTI nor PHT is said"),
+    # Mitral prosthesis (mv_morph = műbillentyű; calculator v4.33, 2026-10-13; template.md 4.14): typed / calculated on
+    # the page, written in the report's mitral part. The prosthesis' EOA is the MVA (VTI) box; its peak E is measured
+    # with CW (not the PW E of E/A).
+    Field("mv_peak_e", "Peak E", "m/s", "num", "mitral prosthesis peak E velocity (CW)", ai=False),
+    Field("mv_dvi", "MV DVI", "", "num", "MV VTI (CW) / LVOT VTI", calc=2, ai=False),
+    Field("mv_eoai", "EOAi", "cm2/m2", "num", "mitral prosthesis EOA / BSA", calc=2, ai=False),
 
     # --- Tricuspidalis billentyű ----------------------------------------------------
     Field("tv_morph", "Tricuspidalis billentyű", "", "choice", "picked on the page", ai=False),

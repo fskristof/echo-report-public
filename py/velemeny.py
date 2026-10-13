@@ -414,6 +414,8 @@ def diastolic_excluded(r):
         return True                                               # severe (primary) MR
     if any(r.values.get(k) == "LVAD" for k in ("device", "device_2", "device_3")):
         return True
+    if r.values.get("mv_morph") == "műbillentyű":
+        return True                                               # mitral prosthesis, picked in the card title
     mitral = (r.texts.get("mitralis") or "").lower()
     if re.search(r"műbillentyű|protézis|annuloplast|gyűrű|clip|teer|plasztika|javított", mitral):
         return True                                               # mitral prosthesis / repair
@@ -568,26 +570,30 @@ def stenosis(grades, keys, anchors=()):
     return top, len(set(found.values())) > 1
 
 
-PROSTHETIC_KINDS = {"Mechanikus": "mechanikus", "Biológiai": "biológiai", "TAVI": "biológiai"}
+PROSTHETIC_KINDS = {"Mechanikus": "mechanikus", "Biológiai": "biológiai", "TAVI": "biológiai",
+                    "Transzkatéteres": "biológiai"}          # (mitral: SAPIEN valve-in-valve / ring / MAC)
 VERDICT_WORDS = {"possibleStenosis": "lehetséges stenosis", "stenosis": "stenosis",
-                 "discordant": "ellentmondó mérések"}
+                 "discordant": "ellentmondó mérések",
+                 # the mitral verdict only (calculator v4.33): a normal PHT with raised flow parameters
+                 "mr": "jelentős műbillentyű MR gyanúja",
+                 "highFlow": "emelkedett flow-paraméterek normál PHT mellett (MR, magas flow vagy PPM?)"}
 
 
-def prosthetic_sentence(info):
-    """The aortic prosthesis. info = what the page knows: {"verdict": the calculator's category, "note": "ppm" /
-    "highFlow", "kind": "Mechanikus" / "Biológiai" / "TAVI"} (True = ticked, nothing else known).
-    A good function is written; anything else stays a marker for the doctor."""
+def prosthetic_sentence(info, valve="aorta"):
+    """A prosthesis (aorta; mitralis since 2026-10-13). info = what the page knows: {"verdict": the calculator's
+    category, "note": "ppm" / "highFlow" / ..., "kind": "Mechanikus" / "Biológiai" / "TAVI" / "Transzkatéteres"}
+    (True = ticked, nothing else known). A good function is written; anything else stays a marker for the doctor."""
     info = info if isinstance(info, dict) else {}
     verdict, note, kind = info.get("verdict"), info.get("note"), PROSTHETIC_KINDS.get(info.get("kind"))
     if verdict == "normal" and note != "ppm":
         if kind:
-            return f"Jó {kind} aorta műbillentyű funkció."
+            return f"Jó {kind} {valve} műbillentyű funkció."
         reason = "a műbillentyű típusa nincs megadva"
     elif verdict == "normal":
         reason = "PPM"
     else:
         reason = VERDICT_WORDS.get(verdict, "nincs elég mérés a műbillentyű értékeléséhez")
-    return CHECK.format("aorta műbillentyű: " + reason)
+    return CHECK.format(f"{valve} műbillentyű: " + reason)
 
 
 def names_text(names):
@@ -612,15 +618,16 @@ MORPH_KEY = {"mitralis": "mv_morph", "tricuspidalis": "tv_morph", "aorta": "av_m
 
 def morph_text(r, name):
     """The look picked on the page as a line of the valve text: "Megvastagodott aorta billentyű". Nothing for vékony
-    (a normal valve: "Ép billentyűk" can stay) and nothing for the aortic műbillentyű (the prosthesis sentence says it)."""
+    (a normal valve: "Ép billentyűk" can stay) and nothing for a műbillentyű (the prosthesis sentence says it)."""
     look = r.values.get(MORPH_KEY.get(name, ""))
-    if not look or look == "vékony" or (look == "műbillentyű" and name == "aorta"):
+    if not look or look == "vékony" or look == "műbillentyű":
         return ""
-    return f"{name} műbillentyű" if look == "műbillentyű" else f"{look} {name} billentyű"
+    return f"{look} {name} billentyű"
 
 
-def valves_part(r, grades=None, prosthetic=False):
-    """(sentences about the valves themselves, regurgitation text without full stop)."""
+def valves_part(r, grades=None, prosthetic=False, mitral_prosthetic=None):
+    """(sentences about the valves themselves, regurgitation text without full stop). mitral_prosthetic: the page's
+    mitral prosthesis verdict (as `prosthetic`); the mitral picker's "műbillentyű" alone already makes the sentence."""
     grades = grades or {}
     sentences, regurg, clean = [], [], True
     for name, text_key, grade_key in VALVES:
@@ -628,7 +635,10 @@ def valves_part(r, grades=None, prosthetic=False):
         grade = grade_of(r, grade_key)
         word = REGURG_WORDS.get(grade)
         severity, mixed = (None, False)
-        if name == "mitralis":
+        if name == "mitralis" and r.values.get("mv_morph") == "műbillentyű":      # no stenosis sentence for a prosthesis
+            sentences.append(prosthetic_sentence(mitral_prosthetic, "mitralis"))
+            clean = False
+        elif name == "mitralis":
             severity, mixed = stenosis(grades, MITRAL_KEYS)
         elif name == "aorta":
             if prosthetic:
@@ -732,10 +742,11 @@ def pericardium_sentence(r):
 # The whole vélemény
 # =====================================================================================
 
-def generate(r, sex, grades=None, prosthetic=False):
+def generate(r, sex, grades=None, prosthetic=False, mitral_prosthetic=None):
     """sex: "ffi" or "no" (the LV size and the aorta use it). grades: the calculator's badges of the stenosis boxes,
-    as the page shows them ({"ava": "severe", ...}); prosthetic: "Műbillentyű" is ticked."""
-    valve_sentences, regurgitation = valves_part(r, grades, prosthetic)
+    as the page shows them ({"ava": "severe", ...}); prosthetic: "Műbillentyű" is ticked (aortic); mitral_prosthetic:
+    the mitral prosthesis verdict the page shows."""
+    valve_sentences, regurgitation = valves_part(r, grades, prosthetic, mitral_prosthetic)
     pasp = pasp_phrase(r)
     if regurgitation:                                # "Nem jelentős mitralis és tricuspidalis regurgitatio, a becsült ..."
         regurgitation += f", {pasp}." if pasp else "."

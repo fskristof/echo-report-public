@@ -736,7 +736,7 @@
     .bar { background: var(--bg); }
   }
 </style>
-<meta name="echocore-version" content="73bfe7f, 2026-10-11">
+<meta name="echocore-version" content="ddb81b6, 2026-10-13">
 <script src="pyodide/pyodide.js"></script>
 <script src="static-api.js"></script>
 </head>
@@ -994,6 +994,7 @@
 <script src="calc/calc-core.js"></script>
 <script src="calc/wiki-data.js"></script>
 <script src="calc/prosthetic-data/aortic-valves.js"></script>
+<script src="calc/prosthetic-data/mitral-valves.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 // The public by-hand version (GitHub Pages, no server; build_public.py): web/static-api.js sets ECHO_STATIC and
@@ -1228,7 +1229,8 @@ const MORE = (...cells) => ({ offpage: true, more: true, cells });   // a line o
                                                                       // or shown when it has a value
 const F = (...keys) => ({ flow: keys });
 const P3 = (a, b, c, label) => ({ pair: [a, b, c], seps: ["/", "="], label, unitLast: true });   // X / X = X %
-const PV = (...lines) => ({ prosthetic: lines });
+const PV = (...lines) => ({ prosthetic: lines, pos: "av" });
+const MPV = (...lines) => ({ prosthetic: lines, pos: "mv" });   // the mitral one (picker's "műbillentyű", 2026-10-13)
 const POP = (key, inputs, note) => ({ key, popup: inputs, note });   // a box with a calculator button on its right:
                                                                      // its inputs in a small window (FAC: RVEDA, RVESA)
 const CAP = (text, cols, gap) => ({ caption: text, cols, gap });   // a small title over the first `cols` columns of a
@@ -1268,8 +1270,12 @@ const LAYOUT = {
                              ["mr_rad", "mr_vmax", "mr_vc"], ["mr_ero", "mr_vti", "vena_pulm_flow"],
                              ["mr_regvol", "mr_avel", "mv_vti_pw"], ["mr_regfrac", null, "mv_lvot_vti"]),
                          // gradient | VTI (CW) | PHT, and the MVA from each under it (as in the report)
+                         // with the picker's "műbillentyű": the same part becomes "Mitrális műbillentyű" (MVA (VTI) is
+                         // called EOA, no MVA (PHT)) + DVI / EOAi, the valve type / size, normal values and verdict
+                         // (Peak E · EOAi · DVI: a line that closes up in the grey prosthesis box; as a third row of the
+                         // grid, three "Lehetséges stenosis" badges made it ~190 px too wide for the card)
                          { ...SUB("Mitrális stenosis", ["mv_grad", "mv_vti_cw", "mv_pht"], [BADGE("mv_grad"), "mva_vti", "mva_pht"],
-                                  OFF("mva")), tight: true },     // 3 columns with badges: smaller boxes
+                                  OFF("mva"), MPV(C("mv_peak_e", "mv_eoai", "mv_dvi"))), tight: true },   // 3 columns with badges: smaller boxes
                          "text"],
   "Tricuspidalis billentyű": [["ti", P("pasp_grad", "rap", "+", "APsyst", { iconAfter: true }),   // grad. + RAP; the
                                P("ivc_max", "ivc_min", "/", "IVC")],          // RAP's ƒx / mic after "Hgmm"
@@ -1323,11 +1329,11 @@ const MIN_ROWS = { falmozgas: 2, bal_kamra: 2, velemeny: 3 };
 const ALWAYS_TEXTS = new Set(["velemeny"]);             // shown even when empty (the opinion is written here)
 const FOLDED = new Set(["Pulmonalis billentyű"]);       // cards that start closed
 // the valve's look (vékony / megvastagodott / meszes, + műbillentyű for the aortic and mitral valve): a picker in the
-// card's title, empty at first (page only so far; the mitral műbillentyű part comes later)
+// card's title, empty at first; "műbillentyű" opens the prosthetic part (aortic: PV, mitral: MPV)
 const MORPH_OF = { "Mitrális billentyű": "mv_morph", "Tricuspidalis billentyű": "tv_morph", "Aorta billentyű": "av_morph" };
 // ⓘ buttons in the card titles: the calculator's severity pages (severityInfo), in the side panel
 // (short names; the full name shows on hover)
-const CARD_INFO = { "Mitrális billentyű": [["mr", "MR"], ["ms", "MS"]],
+const CARD_INFO = { "Mitrális billentyű": [["mr", "MR"], ["ms", "MS"], ["mvProsthetic", "Műbillentyű"]],
                     "Tricuspidalis billentyű": [["tr", "TR"]],
                     "Aorta billentyű": [["as", "AS"], ["ar", "AR"], ["avProsthetic", "Műbillentyű"]] };
 /* ---------- Arrangements: where the cards stand (only that; what is inside the cards is shared) ----------
@@ -1414,7 +1420,8 @@ function buildForm(form, manual = false) {
   root.innerHTML = "";
   root.classList.toggle("manual", manual);        // typed by hand: every box shown, not dimmed
   root.classList.remove("review");
-  Object.assign(pv, { on: false, valve: null, size: null, kind: null });   // a new dictation: no prosthesis chosen
+  for (const p of [pv, mpv]) Object.assign(p, { on: false, valve: null, size: null, kind: null });   // a new report:
+                                                                                                    // no prosthesis chosen
   // the text boxes as the AI wrote them: the server compares only the AI's own words with the transcript, not what
   // the doctor types afterwards
   state.aiTexts = { egyeb: form.egyeb };
@@ -1488,6 +1495,12 @@ function buildForm(form, manual = false) {
     avMorph.input.addEventListener("change", () => setProsthetic(avMorph.input.value === "műbillentyű"));
     if (avMorph.input.value === "műbillentyű") setProsthetic(true);
   }
+  // the mitral picker's "műbillentyű" = the mitral prosthesis part (inside "Mitrális stenosis")
+  const mvMorph = state.fields.mv_morph;
+  if (mvMorph) {
+    mvMorph.input.addEventListener("change", () => setMitralProsthetic(mvMorph.input.value === "műbillentyű"));
+    if (mvMorph.input.value === "műbillentyű") setMitralProsthetic(true);
+  }
   refreshPvl();
   $("egyeb").value = form.egyeb;
   $("egyeb").oninput = () => { autoGrow($("egyeb")); scheduleRender(); };
@@ -1541,6 +1554,9 @@ function refresh3dButton() {
 function refreshPvl() {
   const f = state.fields.pvl;
   if (f) f.cell.classList.toggle("pv-hidden", !pv.on && !f.input.value.trim());
+  // MVA (PHT): not for a mitral prosthesis (220 / PHT overestimates its EOA); a dictated value stays visible
+  const m = state.fields.mva_pht;
+  if (m) m.cell.classList.toggle("pv-hidden", mpv.on && !m.input.value.trim());
 }
 
 /* "+" next to Eszköz: opens the next device line (a patient can have up to 3 devices; each is
@@ -2151,7 +2167,8 @@ const GRADE_OF = { mr_ero: "mrEro", mr_regvol: "mrRegVol", mr_regfrac: "mrRegFra
   ar_ero: "arEro", ar_regvol: "arRegVol", ar_regfrac: "arRegFraction", tr_ero: "trEro", tr_regvol: "trRegVol",
   ava: "ava", avai: "avai", mva_vti: "mvaVti", mva_pht: "mvaPht", dvi: "dviVti", dvi_vmax: "dviVmax",
   mv_lvot_vti: "mvVtiLvotVti", co: "cardiacOutput", ci: "cardiacIndex", av_at: "avAt", av_at_et: "avAtEt",
-  mr_vc: "mrVc", tr_vc: "trVc", ar_vc: "arVc", ar_pht: "arPht", mv_pht: "mvPht", mv_grad: "mvGrad" };
+  mr_vc: "mrVc", tr_vc: "trVc", ar_vc: "arVc", ar_pht: "arPht", mv_pht: "mvPht", mv_grad: "mvGrad",
+  mv_peak_e: "mvPeakE", mv_dvi: "mvDvi", mv_eoai: "mvEoai" };   // mitral prosthesis only (gradeOf)
 // badges that don't fit beside their box: shown where the layout puts BADGE(key) instead
 const BADGE_ELSEWHERE = new Set(["mv_grad"]);
 // Limits the calculator shows only as tables (its MR / TR / AR info pages, severityInfo), turned into
@@ -2173,9 +2190,13 @@ const numOf = (key) => {
   return isNaN(x) ? null : x;
 };
 
-/* ---------- Prosthetic aortic valve ("Műbillentyű" ticked in the Aorta card) ---------- */
-const pv = { on: false, valve: null, size: null, kind: null };   // kind: TAVI / Biológiai / Mechanikus (also without a valve)
-const allValves = () => window.prostheticAorticValves || [];
+/* ---------- Prosthetic valves: aortic ("műbillentyű" in the Aorta card's picker) and mitral (the same in the
+   Mitrális card, 2026-10-13, calculator v4.33). One state per position; the parts, picker and verdict serve both. ---------- */
+const pv = { pos: "av", on: false, valve: null, size: null, kind: null };   // kind: TAVI / Biológiai / Mechanikus
+const mpv = { pos: "mv", on: false, valve: null, size: null, kind: null };  // kind: Biológiai / Mechanikus / Transzkatéteres
+const PROS = { av: pv, mv: mpv };
+const pid = (pos, name) => (pos === "av" ? "pv-" : "mpv-") + name;            // the element ids of each position's part
+const allValves = (pos) => (pos === "mv" ? window.prostheticMitralValves : window.prostheticAorticValves) || [];
 function bmiNow() {                  // the EOAi grading uses different cutoffs above BMI 30
   const kg = numOf("ts");
   let m = numOf("tm");
@@ -2183,31 +2204,52 @@ function bmiNow() {                  // the EOAi grading uses different cutoffs 
   if (m > 3) m /= 100;                                   // typed in cm
   return kg / (m * m);
 }
+const sizeEntry = (p) => p.valve && p.valve.sizes.find((s) => s.size === p.size);
 // EOA against the chosen valve and size: the calculator's rule (reference mean − 1 SD / − 2 SD)
 function gradeEoa(eoa) {
-  const entry = pv.valve && pv.valve.sizes.find((s) => s.size === pv.size);
+  const entry = sizeEntry(pv);
   const ref = entry && parseMeanSd(entry.eoa);
   if (!ref) return null;
   const below = ref.mean - eoa;
   return below <= ref.sd ? "normal" : below <= 2 * ref.sd ? "possibleStenosis" : "stenosis";
 }
+// the mitral EOA against the chosen valve and size, in SDs (the calculator's gradeMvEoaVsReference: the aortic 1 / 2 SD
+// bands applied by analogy); shown in the normal values box, the EOA box's own badge is Table 11's
+function mvEoaVsReference(eoa) {
+  const entry = sizeEntry(mpv);
+  const ref = entry && parseMeanSd(entry.eoa);
+  if (!ref || ref.sd <= 0) return null;
+  const z = (eoa - ref.mean) / ref.sd;
+  return { z, grade: z >= -1 ? "normal" : z >= -2 ? "possibleStenosis" : "stenosis" };
+}
+// a mitral prosthesis: Table 11 (Zoghbi 2024) for the gradient, PHT, EOA (= MVA (VTI)) and DVI; Table 7 for EOAi;
+// Table 13 for the MR ERO (0,40 itself is severe)
+const MV_PROSTHETIC_RULES = { mv_peak_e: gradeFns.mvPeakE, mv_grad: gradeFns.mvMeanGradient, mv_pht: gradeFns.mvPht, mva_vti: gradeFns.mvEoa,
+                              mv_dvi: gradeFns.mvDvi, mr_ero: gradeFns.mrEroProsthetic };
 function gradeOf(key, x) {
   if (pv.on) {
     if (key === "dvi" || key === "dvi_vmax") return gradeFns.dviProsthetic(x);
     if (key === "ava") return gradeEoa(x);
     if (key === "avai") { const bmi = bmiNow(); return bmi ? gradeEoaiPPM(x, bmi) : null; }
   } else if (key === "av_at" || key === "av_at_et") return null;     // graded only for a prosthetic valve
+  if (mpv.on) {
+    if (MV_PROSTHETIC_RULES[key]) return MV_PROSTHETIC_RULES[key](x);
+    if (key === "mv_eoai") { const bmi = bmiNow(); return bmi ? gradeMvEoaiPPM(x, bmi) : null; }
+  } else if (key === "mv_peak_e" || key === "mv_dvi" || key === "mv_eoai") return null;
   const rule = gradeRule(key);
   return rule ? rule(x) : null;
 }
 // Every badge a box can get (for the room it keeps): its rule tried over a wide range of values;
-// with "Műbillentyű" ticked, the prosthetic gradings
-const PROSTHETIC_GRADES = { ava: ["normal", "possibleStenosis", "stenosis"], avai: ["normal", "moderate", "severe"],
-                            dvi: ["normal", "possibleStenosis", "stenosis"], dvi_vmax: ["normal", "possibleStenosis", "stenosis"] };
+// with "műbillentyű" picked, the prosthetic gradings
+const STENOSIS3 = ["normal", "possibleStenosis", "stenosis"], PPM3 = ["normal", "moderate", "severe"];
+const PROSTHETIC_GRADES = { ava: STENOSIS3, avai: PPM3, dvi: STENOSIS3, dvi_vmax: STENOSIS3 };
+const MV_PROSTHETIC_GRADES = { mv_peak_e: STENOSIS3, mv_grad: STENOSIS3, mv_pht: STENOSIS3, mva_vti: STENOSIS3, mv_dvi: STENOSIS3, mv_eoai: PPM3 };
 const sampledGrades = {};
 function possibleGrades(key) {
   if (pv.on && PROSTHETIC_GRADES[key]) return PROSTHETIC_GRADES[key];
   if (!pv.on && (key === "av_at" || key === "av_at_et")) return [];
+  if (mpv.on && MV_PROSTHETIC_GRADES[key]) return MV_PROSTHETIC_GRADES[key];
+  if (!mpv.on && (key === "mv_peak_e" || key === "mv_dvi" || key === "mv_eoai")) return [];
   if (!sampledGrades[key]) {
     const rule = gradeRule(key), found = new Set();
     for (let x = 0; rule && x <= 2000; x += x < 2 ? 0.005 : x < 30 ? 0.05 : x < 200 ? 0.5 : 5) { const g = rule(x); if (g) found.add(g); }
@@ -2216,24 +2258,28 @@ function possibleGrades(key) {
   return sampledGrades[key];
 }
 function refreshBadges() {
+  refreshPvl();
+  const mode = `${pv.on} ${mpv.on}`;
   for (const key of Object.keys(GRADE_OF)) {
     const field = state.fields[key];
     if (!field || !field.badge) continue;
-    if (field.ghostFor !== pv.on) {                    // the room it keeps (changes with "Műbillentyű")
+    if (field.ghostFor !== mode) {                     // the room it keeps (changes with "műbillentyű")
       field.ghost.replaceChildren(...possibleGrades(key).map((g) => el("span", "grade grade-" + g, gradeLabels.hu[g])));
-      field.ghostFor = pv.on;
+      field.ghostFor = mode;
     }
     const x = numOf(key), grade = x === null ? null : gradeOf(key, x);
     field.badge.className = "grade" + (grade ? " grade-" + grade : " hidden");
     field.badge.textContent = grade ? gradeLabels.hu[grade] : "";
     // limits valid only at a heart rate of 60–80/min (the MS table's "*"): a "*" when HR is outside
-    const hr = numOf("hr"), [low, high] = HR_LIMITS[key] || [];
+    // (the native MS table only: Table 11 of a prosthesis has no heart-rate range)
+    const hr = numOf("hr"), [low, high] = (!(mpv.on && MV_PROSTHETIC_RULES[key]) && HR_LIMITS[key]) || [];
     if (grade && low !== undefined && hr !== null && (hr < low || hr > high)) {
       field.badge.textContent += "*";
       field.badge.title = `A határértékek ${low}–${high}/perc szívfrekvencia mellett érvényesek (most HR ${state.fields.hr.input.value}/perc).`;
     } else field.badge.removeAttribute("title");
   }
-  if (pv.on) renderVerdict();
+  if (pv.on) renderVerdict("av");
+  if (mpv.on) { renderVerdict("mv"); refreshValve("mv", false); }   // (the EOA vs. the valve's reference follows the EOA)
 }
 // badges whose limits hold only in a heart-rate range (calculator, MS page: "*At a heart rate of 60–80")
 const HR_LIMITS = { mv_grad: [60, 80] };
@@ -2301,48 +2347,85 @@ function cardExtras(title, manual = false) {
 }
 
 function makeProsthetic(part, byKey, choices) {
-  const block = el("div", "pv-block" + (pv.on ? "" : " hidden"));
-  block.id = "pv-block";
+  const pos = part.pos || "av", p = PROS[pos];
+  const block = el("div", "pv-block" + (p.on ? "" : " hidden"));
+  block.id = pid(pos, "block");
   const row = el("div", "pv-row");
   const typeLabel = el("label", "", translations.hu.valveType), sizeLabel = el("label", "", translations.hu.valveSize);
   const type = el("button", "pv-pick"), size = el("select");   // the type: opens the valve list (openValvePicker)
-  type.id = typeLabel.htmlFor = "pv-type";
-  size.id = sizeLabel.htmlFor = "pv-size";
+  type.id = typeLabel.htmlFor = pid(pos, "type");
+  size.id = sizeLabel.htmlFor = pid(pos, "size");
   type.type = "button";
   type.innerHTML = `<span class="pv-name">Válassz…</span>${SEARCH_ICON}`;
-  type.addEventListener("click", openValvePicker);
-  size.addEventListener("change", () => { pv.size = size.value || null; refreshValve(); });
+  type.addEventListener("click", () => openValvePicker(pos));
+  size.addEventListener("change", () => { p.size = size.value || null; refreshValve(pos); });
   row.append(typeLabel, type, sizeLabel, size);
   block.appendChild(row);
-  for (const p of groupLines(part.prosthetic)) block.appendChild(makePart(p, byKey, choices));
+  for (const l of groupLines(part.prosthetic)) block.appendChild(makePart(l, byKey, choices));
   const ref = el("div", "valve-reference hidden");
-  ref.id = "pv-ref";
+  ref.id = pid(pos, "ref");
   const verdict = el("div", "av-verdict hidden");
-  verdict.id = "pv-verdict";
+  verdict.id = pid(pos, "verdict");
   block.append(ref, verdict);
-  setTimeout(fillSizes);                               // once the block is on the page
+  setTimeout(() => fillSizes(pos));                    // once the block is on the page
   return block;
 }
-function fillSizes() {
-  const size = $("pv-size");
+function fillSizes(pos = "av") {
+  const size = $(pid(pos, "size")), p = PROS[pos];
   if (!size) return;
   size.innerHTML = "";
   size.append(new Option(uiStrings.hu.selectSize, ""));
-  for (const entry of pv.valve ? pv.valve.sizes : []) size.append(new Option(entry.size, entry.size));
-  size.disabled = !pv.valve;
+  for (const entry of p.valve ? p.valve.sizes : []) size.append(new Option(entry.size, entry.size));
+  size.value = p.size || "";                           // (a saved report's size, restored before the list was filled)
+  size.disabled = !p.valve;
 }
-function refreshValve() {                               // the chosen valve's normal values
-  const box = $("pv-ref"), t = uiStrings.hu;
-  const entry = pv.valve && pv.valve.sizes.find((s) => s.size === pv.size);
+// the chosen valve's normal values (mitral: also the peak velocity and PHT, and the measured EOA against them)
+function refreshValve(pos = "av", badges = true) {
+  const box = $(pid(pos, "ref")), t = uiStrings.hu, p = PROS[pos];
+  if (!box) return;
+  const entry = sizeEntry(p);
   const rows = [];
   if (entry && entry.peak) rows.push(`<li><strong>${t.valvePeakGradient}:</strong> ${entry.peak} Hgmm</li>`);
   if (entry && entry.mean) rows.push(`<li><strong>${t.valveMeanGradient}:</strong> ${entry.mean} Hgmm</li>`);
+  if (entry && entry.vel) rows.push(`<li><strong>${t.valvePeakVelocity}:</strong> ${entry.vel} m/s</li>`);
+  if (entry && entry.pht) rows.push(`<li><strong>${t.valvePht}:</strong> ${entry.pht} ms</li>`);
   if (entry && entry.eoa) rows.push(`<li><strong>${t.valveEoa}:</strong> ${entry.eoa} cm²</li>`);
   if (entry && entry.dvi) rows.push(`<li><strong>${t.valveDvi}:</strong> ${entry.dvi}</li>`);
-  const note = pv.valve && pv.valve.thirdParty ? `<p class="valve-third-party-note">${t.valveThirdPartyNote}</p>` : "";
+  const eoa = pos === "mv" ? numOf("mva_vti") : null, vs = eoa === null ? null : mvEoaVsReference(eoa);
+  if (vs) rows.push(`<li title="Az aorta műbillentyűk 1 / 2 SD sávjai mitrálisra alkalmazva (extrapoláció)">` +
+                    `<strong>${translations.hu.mvEoaRef}:</strong> ${vs.z.toFixed(1).replace(".", ",").replace("-", "−")} SD ` +
+                    `<span class="grade grade-${vs.grade}">${gradeLabels.hu[vs.grade]}</span></li>`);
+  const note = p.valve && p.valve.thirdParty ? `<p class="valve-third-party-note">${t.valveThirdPartyNote}</p>` : "";
   box.innerHTML = rows.length ? `<h3>${t.valveNormalValues}</h3><ul>${rows.join("")}</ul>${note}` : "";
   box.classList.toggle("hidden", !rows.length);
-  refreshBadges();
+  if (badges) {
+    refreshBadges();
+    scheduleRender();                                   // the report's first valve line names the type / valve / size
+  }
+}
+/* The chosen valve, type and size are saved with the report among its values (2026-10-13): valve_av / valve_mv
+   (+ _size, _kind). They are not boxes: the server ignores names it does not know (live_report), so they never reach
+   the report text, the checks or the AI. Only while that position's "műbillentyű" is picked. */
+function valveValues() {
+  const out = {};
+  for (const [pos, p] of Object.entries(PROS)) {
+    if (!p.on) continue;
+    if (p.valve) out[`valve_${pos}`] = p.valve.name;
+    if (p.size) out[`valve_${pos}_size`] = p.size;
+    if (p.kind) out[`valve_${pos}_kind`] = p.kind;
+  }
+  return out;
+}
+function restoreValves(values) {                        // a saved report opened again: its valves back in the pickers
+  for (const [pos, p] of Object.entries(PROS)) {
+    if (!$(pid(pos, "type"))) continue;
+    p.valve = allValves(pos).find((v) => v.name === values[`valve_${pos}`]) || null;
+    p.size = p.valve && p.valve.sizes.some((s) => s.size === values[`valve_${pos}_size`]) ? values[`valve_${pos}_size`] : null;
+    p.kind = p.valve ? valveKind(p.valve, pos) : values[`valve_${pos}_kind`] || null;
+    showValveChoice(pos);
+    fillSizes(pos);
+    refreshValve(pos);
+  }
 }
 function setProsthetic(on) {
   pv.on = on;
@@ -2355,50 +2438,82 @@ function setProsthetic(on) {
   refreshBadges();
   refit();
 }
+// The mitral picker's "műbillentyű": "Mitrális stenosis" becomes "Mitrális műbillentyű" and opens; MVA (VTI) is the
+// prosthesis' EOA, MVA (PHT) goes (the server no longer calculates it: 220 / PHT overestimates a prosthesis' EOA)
+function setMitralProsthetic(on) {
+  mpv.on = on;
+  const block = $("mpv-block");
+  block?.classList.toggle("hidden", !on);
+  relabel("mva_vti", on ? "EOA" : null);
+  if (!on) $("mpv-verdict")?.classList.add("hidden");
+  const sub = block && block.closest(".sub");
+  if (sub) {
+    const title = [...sub.querySelector(".sub-toggle").childNodes].find((n) => n.nodeType === 3);
+    if (title) title.textContent = on ? "Mitrális műbillentyű" : "Mitrális stenosis";
+    if (on) setSubOpen(sub, true);
+  }
+  refreshPvl();
+  refreshBadges();
+  refit();
+}
 function relabel(key, text) {
   const field = state.fields[key];
   if (field) field.cell.querySelector(".cell-label").textContent = text || SHORT_LABELS[key] || field.label;
 }
-// The calculator's elevated-gradient algorithm (AT, AT/ET, DVI; EOAi for the PPM note)
-const AV_COLOR = { normal: "normal", possibleStenosis: "caution", stenosis: "danger", discordant: "neutral" };
+// The calculator's verdicts. Aortic: the elevated-gradient algorithm (AT, AT/ET, DVI; EOAi for the PPM note).
+// Mitral (calculateMvVerdict): Table 11 + Table 12, PHT decides; needs PHT and one of peak E / gradient / DVI.
+const AV_COLOR = { normal: "normal", possibleStenosis: "caution", stenosis: "danger", discordant: "neutral",
+                   mr: "danger", highFlow: "caution" };
 function avVerdictNow() {                               // {category, note} or null (not enough measurements)
   const at = state.fields.av_at ? state.fields.av_at.input.value : "";
   return calculateAvVerdict(at, numOf("av_at_et"), numOf("dvi"), numOf("dvi_vmax"), numOf("avai"), "hu");
 }
-function renderVerdict() {
-  const box = $("pv-verdict");
+function mvVerdictNow() {
+  const raw = (key) => state.fields[key] ? state.fields[key].input.value.trim() : "";
+  return calculateMvVerdict(raw("mv_peak_e"), raw("mv_grad"), numOf("mv_dvi"), raw("mv_pht"), "hu");
+}
+function renderVerdict(pos = "av") {
+  const box = $(pid(pos, "verdict"));
   if (!box) return;
-  const verdict = avVerdictNow();
+  const verdict = pos === "mv" ? mvVerdictNow() : avVerdictNow();
   if (!verdict) { box.className = "av-verdict hidden"; return; }
-  const t = translations.hu, word = (s) => t["av" + s[0].toUpperCase() + s.slice(1)];
+  const t = translations.hu, word = (s) => t[pos + s[0].toUpperCase() + s.slice(1)];
   box.className = `av-verdict av-verdict-${AV_COLOR[verdict.category]}`;
-  box.innerHTML = `<h3>${t.avVerdictTitle}</h3><p class="av-verdict-headline">${word(verdict.category)}</p>` +
+  box.innerHTML = `<h3>${t[pos + "VerdictTitle"]}</h3><p class="av-verdict-headline">${word(verdict.category)}</p>` +
                   (verdict.note ? `<p>${word(verdict.note)}</p>` : "");
 }
-/* The valve picker: a small window over the page. Step 1: the type (TAVI / Biológiai / Mechanikus); a click slides
-   to step 2: that type's valves with a search box on top (‹ slides back). Typing filters (accents and case don't
-   matter), a click or Enter chooses, Esc or a click outside closes. A type chosen without a valve stays in the box
-   ("TAVI") and is used by the Vélemény generator. */
-const VALVE_KINDS = [["TAVI", "Transzkatéteres billentyűk"], ["Biológiai", "Sebészi bioprotézisek"],
-                     ["Mechanikus", "Mechanikus műbillentyűk"]];
+/* The valve picker: a small window over the page, for the aortic or the mitral valve (`picking`). Step 1: the type
+   (aortic: TAVI / Biológiai / Mechanikus; mitral: Biológiai / Mechanikus / Transzkatéteres); a click slides to step 2:
+   that type's valves with a search box on top (‹ slides back). Typing filters (accents and case don't matter), a click
+   or Enter chooses, Esc or a click outside closes. A type chosen without a valve stays in the box ("TAVI") and is used
+   by the Vélemény generator. */
+const VALVE_KINDS = { av: [["TAVI", "Transzkatéteres billentyűk"], ["Biológiai", "Sebészi bioprotézisek"],
+                           ["Mechanikus", "Mechanikus műbillentyűk"]],
+                      mv: [["Biológiai", "Sebészi bioprotézisek"], ["Mechanikus", "Mechanikus műbillentyűk"],
+                           ["Transzkatéteres", "SAPIEN: valve-in-valve / ring / MAC"]] };
 const SEARCH_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
                     'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
-const valveKind = (v) => v.transcatheter ? "TAVI" : v.category === "mechanical" ? "Mechanikus" : "Biológiai";
+let picking = "av";                                     // which valve the picker is open for
+const valveKind = (v, pos = picking) => v.transcatheter ? (pos === "mv" ? "Transzkatéteres" : "TAVI")
+                                      : v.category === "mechanical" ? "Mechanikus" : "Biológiai";
 const plainText = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-function showValveChoice() {                            // the box: the valve, else the type, else "Válassz…"
-  $("pv-type").querySelector(".pv-name").textContent = pv.valve ? pv.valve.name : pv.kind || "Válassz…";
-  $("pv-type").title = pv.valve ? `${pv.valve.name} (${valveKind(pv.valve).toLowerCase()})` : pv.kind || "";
+function showValveChoice(pos = picking) {               // the box: the valve, else the type, else "Válassz…"
+  const p = PROS[pos], box = $(pid(pos, "type"));
+  box.querySelector(".pv-name").textContent = p.valve ? p.valve.name : p.kind || "Válassz…";
+  box.title = p.valve ? `${p.valve.name} (${valveKind(p.valve, pos).toLowerCase()})` : p.kind || "";
 }
 function chooseKind(kind) {                             // step 1 -> step 2 (slides)
-  if (kind !== pv.kind && pv.valve && valveKind(pv.valve) !== kind) {      // another type: the valve no longer fits
-    pv.valve = null; pv.size = null; fillSizes(); refreshValve();
+  const p = PROS[picking];
+  if (kind !== p.kind && p.valve && valveKind(p.valve) !== kind) {        // another type: the valve no longer fits
+    p.valve = null; p.size = null; fillSizes(picking); refreshValve(picking);
   }
-  pv.kind = kind;
+  p.kind = kind;
+  scheduleRender();                                     // "Mechanikus mitrális műbillentyű." in the report
   showValveChoice();
   showValveList();
 }
 function showValveList() {
-  $("vp-title").textContent = pv.kind;
+  $("vp-title").textContent = PROS[picking].kind;
   $("vp-search").value = "";
   drawValveList();
   document.querySelector(".vp-panel").classList.add("on-list");
@@ -2406,14 +2521,14 @@ function showValveList() {
   setTimeout(() => $("vp-search").focus({ preventScroll: true }), 50);
 }
 function showValveKinds() {                             // back to step 1 (slides back)
-  $("vp-title").textContent = "Billentyű típusa";
+  $("vp-title").textContent = picking === "mv" ? "Mitrális billentyű típusa" : "Billentyű típusa";
   document.querySelector(".vp-panel").classList.remove("on-list");
   const box = $("vp-kinds");
   box.replaceChildren();
-  for (const [kind, sub] of VALVE_KINDS) {
-    const b = el("button", "vp-kind" + (kind === pv.kind ? " on" : ""));
+  for (const [kind, sub] of VALVE_KINDS[picking]) {
+    const b = el("button", "vp-kind" + (kind === PROS[picking].kind ? " on" : ""));
     b.type = "button";
-    const n = allValves().filter((v) => valveKind(v) === kind).length;
+    const n = allValves(picking).filter((v) => valveKind(v) === kind).length;
     b.append(el("strong", "", kind), el("span", "", `${sub} · ${n}`));
     b.addEventListener("click", () => chooseKind(kind));
     box.appendChild(b);
@@ -2423,23 +2538,24 @@ function showValveKinds() {                             // back to step 1 (slide
   setTimeout(() => (box.querySelector(".vp-kind.on") || box.firstChild).focus({ preventScroll: true }), 50);
 }
 function chooseValve(valve) {
+  const p = PROS[picking];
   closeValvePicker();
-  if (valve === pv.valve) return;
-  pv.valve = valve;
-  pv.kind = valve ? valveKind(valve) : pv.kind;
-  pv.size = null;
+  if (valve === p.valve) return;
+  p.valve = valve;
+  p.kind = valve ? valveKind(valve) : p.kind;
+  p.size = null;
   showValveChoice();
-  fillSizes();
-  refreshValve();
-  $("pv-size").focus();                                // the size is next
+  fillSizes(picking);
+  refreshValve(picking);
+  $(pid(picking, "size")).focus();                     // the size is next
 }
 function drawValveList() {
-  const words = plainText($("vp-search").value).split(/\s+/).filter(Boolean), list = $("vp-list");
+  const words = plainText($("vp-search").value).split(/\s+/).filter(Boolean), list = $("vp-list"), p = PROS[picking];
   list.innerHTML = "";
-  const found = allValves().filter((v) => valveKind(v) === pv.kind &&                 // the chosen type only,
-                                         words.every((w) => plainText(v.name).includes(w)));  // every word typed
+  const found = allValves(picking).filter((v) => valveKind(v) === p.kind &&          // the chosen type only,
+                                                 words.every((w) => plainText(v.name).includes(w)));   // every word typed
   for (const v of found) {
-    const b = el("button", "vp-item" + (v === pv.valve ? " on" : ""));
+    const b = el("button", "vp-item" + (v === p.valve ? " on" : ""));
     b.type = "button";
     b.append(el("span", "", v.name));
     if (v.thirdParty) b.append(el("span", "vp-tag", uiStrings.hu.valveThirdPartyTag));
@@ -2448,12 +2564,13 @@ function drawValveList() {
   }
   if (!found.length) list.appendChild(el("div", "vp-empty", "Nincs ilyen billentyű a listában."));
 }
-function openValvePicker() {                            // a type already chosen: straight to its list
+function openValvePicker(pos = "av") {                  // a type already chosen: straight to its list
+  picking = pos;
   $("valve-picker").classList.remove("hidden");
   $("vp-track").style.transition = "none";              // opening: no slide, just the window
   document.querySelector(".vp-viewport").style.transition = "none";
   showValveKinds();
-  if (pv.kind) showValveList();
+  if (PROS[pos].kind) showValveList();
   void $("vp-track").offsetWidth;
   $("vp-track").style.transition = "";
   document.querySelector(".vp-viewport").style.transition = "";
@@ -2529,7 +2646,9 @@ function drawSide() {
   } else if (page.kind === "info") {                   // the same pages as the calculator's ⓘ buttons
     const info = severityInfo.hu[page.key];
     $("side-title").textContent = info.title;
-    const table = (spec) => spec ? (spec.heading ? `<h3>${spec.heading}</h3>` : "") + buildSeverityTable(spec) : "";
+    // one table, or a list of them (the mitral prosthesis page has three before its figure)
+    const table = (spec) => (spec ? [].concat(spec) : [])
+      .map((s) => (s.heading ? `<h3>${s.heading}</h3>` : "") + buildSeverityTable(s)).join("");
     const list = (items, head) => items && items.length
       ? `<div class="info-notes">${head ? `<h3>${head}</h3>` : ""}<ul>${items.map((n) => `<li>${n}</li>`).join("")}</ul></div>` : "";
     body.innerHTML = table(info.tableBeforeFigure) + (info.figure || "") + list(info.figureNotes) +
@@ -2703,6 +2822,7 @@ function boxesPayload() {                    // the boxes as they are now (what 
     if (!calculated && f.input.value.trim()) values[key] = f.input.value;   // calculated ones are redone
     else if (state.blanked.has(key) && !f.input.value.trim()) values[key] = "";   // emptied by hand: left out
   }
+  Object.assign(values, valveValues());              // the chosen prosthetic valve(s): saved with the report
   const texts = {};
   document.querySelectorAll("textarea.text[data-text-key]").forEach((ta) => { texts[ta.dataset.textKey] = ta.value; });
   return { values, texts, egyeb: $("egyeb").value, transcript: state.transcript, aiTexts: state.aiTexts,
@@ -2731,12 +2851,22 @@ function prostheticNow() {
   if (!pv.on) return null;
   const verdict = avVerdictNow();
   return { verdict: verdict ? verdict.category : null, note: verdict ? verdict.note : null,
-           kind: pv.valve ? valveKind(pv.valve) : pv.kind };          // the type alone is enough for the sentence
+           kind: pv.valve ? valveKind(pv.valve, "av") : pv.kind };    // the type alone is enough for the sentence
+}
+// the same for the mitral prosthesis (normal / possibleStenosis / stenosis / mr / highFlow / discordant); a normal
+// verdict with an EOAi badge of moderate / severe PPM is sent as "ppm" (the generator then leaves a marker)
+function mitralProstheticNow() {
+  if (!mpv.on) return null;
+  const verdict = mvVerdictNow(), eoai = numOf("mv_eoai"), ppm = eoai === null ? null : gradeOf("mv_eoai", eoai);
+  return { verdict: verdict ? verdict.category : null,
+           note: ppm === "moderate" || ppm === "severe" ? "ppm" : verdict ? verdict.note : null,
+           kind: mpv.valve ? valveKind(mpv.valve, "mv") : mpv.kind };
 }
 
 // "Vélemény generálása": the text is added below what is in the box (one empty line between), never replacing it
 async function generateOpinion(sex) {
-  const r = await call("/velemeny", { ...boxesPayload(), sex, grades: stenosisGrades(), prosthetic: prostheticNow() });
+  const r = await call("/velemeny", { ...boxesPayload(), sex, grades: stenosisGrades(), prosthetic: prostheticNow(),
+                                      mitral_prosthetic: mitralProstheticNow() });
   const out = await r.json();
   if (!r.ok) return alert(out.error || "Nem sikerült a vélemény generálása.");
   if (!out.text) return alert("Nincs mit generálni: egyelőre nincs kitöltött érték, amiből vélemény készülne.");
@@ -3086,6 +3216,7 @@ $("import-go").addEventListener("click", async () => {
     closeModals(); $("import-text").value = "";
     newReport(); hide("pick");
     showResult(out);
+    restoreValves(out.valves || {});                          // "TAVI műbillentyű: SAPIEN 3 26 mm." -> the picker
   } catch (e) { alert("Nem sikerült a beolvasás: " + e); }
 });
 
@@ -3331,6 +3462,7 @@ async function openSavedReport(id) {
   closeSide(); hide("pick"); hide("error");
   state.patient = { name: rep.patient_name || "", taj: rep.taj || "" };
   showResult({ form: out, report: out.report, transcript: "", full_transcript: "", pauses: [], timing: {}, manual: true });
+  restoreValves(rep.values);
   state.savedId = rep.id;
   state.savedSnapshot = snapshot();
   refreshSaveButton();

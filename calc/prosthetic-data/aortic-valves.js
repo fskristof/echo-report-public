@@ -12,7 +12,7 @@
 // window.prostheticAorticValves; see loadProstheticAorticValves() in
 // app.js.
 //
-// Each entry: { name, category: "mechanical"|"biological", transcatheter?,
+// Each entry: { name, thirdParty?, category: "mechanical"|"biological", transcatheter?,
 // viv?, inferred?, sizes: [{ size, peak?, mean?, eoa?, dvi? }] }.
 // peak/mean/eoa/dvi are the "mean ± SD" strings exactly as printed in the
 // source table (peak = peak gradient mmHg, mean = mean gradient mmHg,
@@ -387,7 +387,10 @@ window.prostheticAorticValves = [
     { size: "29", peak: "7.7 ± 4.4", mean: "4.1 ± 2.4", eoa: "2.4 ± 0.6" },
   ]},
 
-  // ---- Added from a valve-reference app's own per-size screenshots (not
+  // ---- THIRD-PARTY DATA (thirdParty: true): NOT from the Zoghbi 2024 guideline
+  // and not verified against any manufacturer/primary source (v4.30 audit found
+  // none publishes per-size values; Crown 21 has a ± 0.0 SD, Magna Ease 19 mean
+  // looks inconsistent). The UI shows a note on these. Added from a valve-reference app's own per-size screenshots (not
   // the Zoghbi 2024 appendix tables above) — mechanical/biological category
   // taken from how the source screenshots were organized (folders named
   // "Mechanical"/"Biological"), each also naming a bileaflet mechanism or a
@@ -402,7 +405,7 @@ window.prostheticAorticValves = [
   // likely the same physical valves under a different model name/number —
   // but are kept as separate entries since that's the name this source
   // uses, rather than merged into or renamed from the existing ones.
-  { name: "Carbomedics Orbis", category: "mechanical", sizes: [
+  { name: "Carbomedics Orbis", thirdParty: true, category: "mechanical", sizes: [
     { size: "19", peak: "38.0 ± 12.8", mean: "18.9 ± 8.3", eoa: "1.0 ± 0.3" },
     { size: "21", peak: "26.8 ± 10.1", mean: "12.9 ± 5.4", eoa: "1.4 ± 0.4" },
     { size: "23", peak: "22.5 ± 7.4", mean: "11.0 ± 4.6", eoa: "1.5 ± 0.3" },
@@ -411,7 +414,7 @@ window.prostheticAorticValves = [
     { size: "29", peak: "9.1 ± 4.7", mean: "5.6 ± 3.0", eoa: "3.2 ± 1.6" },
     { size: "31", peak: "9.1 ± 4.7", mean: "5.6 ± 3.0", eoa: "3.2 ± 1.6" },
   ]},
-  { name: "Medtronic Open Pivot AP", category: "mechanical", sizes: [
+  { name: "Medtronic Open Pivot AP", thirdParty: true, category: "mechanical", sizes: [
     { size: "18", mean: "21.0 ± 1.8", eoa: "1.2 ± 0.3" },
     { size: "20", peak: "21.4 ± 4.2", mean: "11.1 ± 3.5", eoa: "1.3 ± 0.3" },
     { size: "22", peak: "18.7 ± 8.3", mean: "10.5 ± 4.5", eoa: "1.7 ± 0.4" },
@@ -419,7 +422,7 @@ window.prostheticAorticValves = [
     { size: "26", mean: "6.0 ± 2.0", eoa: "2.1 ± 0.4" },
     { size: "28", eoa: "2.3" },
   ]},
-  { name: "Medtronic Open Pivot Standard", category: "mechanical", sizes: [
+  { name: "Medtronic Open Pivot Standard", thirdParty: true, category: "mechanical", sizes: [
     { size: "19", peak: "47.0 ± 12.6", mean: "25.3 ± 8.0", eoa: "1.1 ± 0.3" },
     { size: "21", peak: "23.7 ± 6.8", mean: "15.9 ± 5.0", eoa: "1.4 ± 0.5" },
     { size: "23", peak: "19.0 ± 7.0", mean: "14.4 ± 4.9", eoa: "1.7 ± 0.5" },
@@ -427,7 +430,7 @@ window.prostheticAorticValves = [
     { size: "27", peak: "14.0 ± 4.0", mean: "8.4 ± 3.7", eoa: "2.5 ± 0.1" },
     { size: "29", peak: "11.0 ± 3.0", mean: "8.0 ± 3.0", eoa: "3.1 ± 0.8" },
   ]},
-  { name: "CE Magna 3000", category: "biological", sizes: [
+  { name: "CE Magna 3000", thirdParty: true, category: "biological", sizes: [
     { size: "19", peak: "22.9 ± 8.0", mean: "11.9 ± 4.1", eoa: "1.3 ± 0.3" },
     { size: "21", peak: "18.2 ± 5.8", mean: "9.8 ± 3.3", eoa: "1.5 ± 0.3" },
     { size: "23", peak: "17.6 ± 5.7", mean: "9.1 ± 3.3", eoa: "1.8 ± 0.4" },
@@ -435,7 +438,7 @@ window.prostheticAorticValves = [
     { size: "27", mean: "11.3 ± 5.0", eoa: "2.4" },
     { size: "29", mean: "11.3 ± 5.0", eoa: "2.5" },
   ]},
-  { name: "CE Magna Ease 3300", category: "biological", sizes: [
+  { name: "CE Magna Ease 3300", thirdParty: true, category: "biological", sizes: [
     { size: "19", peak: "22.9 ± 8.0", mean: "17.7 ± 0.2", eoa: "1.2 ± 0.1" },
     { size: "21", peak: "18.2 ± 5.8", mean: "9.8 ± 3.3", eoa: "1.4 ± 0.4" },
     { size: "23", peak: "17.6 ± 5.7", mean: "9.1 ± 3.3", eoa: "1.8 ± 0.3" },
@@ -443,7 +446,7 @@ window.prostheticAorticValves = [
     { size: "27", mean: "11.3 ± 5.0", eoa: "2.4" },
     { size: "29", mean: "11.3 ± 5.0", eoa: "2.5" },
   ]},
-  { name: "CE STD 2625", category: "biological", sizes: [
+  { name: "CE STD 2625", thirdParty: true, category: "biological", sizes: [
     { size: "19", peak: "43.5 ± 12.7", mean: "25.6 ± 8.0", eoa: "0.9 ± 0.2" },
     { size: "21", peak: "27.7 ± 7.6", mean: "17.3 ± 6.2", eoa: "1.5 ± 0.3" },
     { size: "23", peak: "28.9 ± 7.5", mean: "16.1 ± 6.2", eoa: "1.7 ± 0.5" },
@@ -452,7 +455,7 @@ window.prostheticAorticValves = [
     { size: "29", mean: "9.9 ± 2.9", eoa: "2.8 ± 0.5" },
     { size: "31", mean: "9.9 ± 2.9", eoa: "2.8 ± 0.5" },
   ]},
-  { name: "Crown", category: "biological", sizes: [
+  { name: "Crown", thirdParty: true, category: "biological", sizes: [
     { size: "19", peak: "18.7 ± 5.1", mean: "13.1 ± 3.3", eoa: "1.1 ± 0.2" },
     { size: "21", peak: "20.2 ± 0.0", mean: "15.4 ± 0.0", eoa: "1.3 ± 0.3" },
     { size: "23", peak: "14.04 ± 4.9", mean: "7.6 ± 3.4", eoa: "1.5 ± 0.3" },
@@ -460,7 +463,7 @@ window.prostheticAorticValves = [
     { size: "27", peak: "13.0 ± 3.0", mean: "6.6 ± 1.7", eoa: "1.8 ± 0.3" },
     { size: "29", eoa: "2.0 ± 0.4" },
   ]},
-  { name: "Freestyle Root", category: "biological", sizes: [
+  { name: "Freestyle Root", thirdParty: true, category: "biological", sizes: [
     { size: "19", mean: "13.0 ± 3.9", eoa: "1.2 ± 0.2" },
     { size: "21", mean: "7.9 ± 2.6", eoa: "1.4 ± 0.2" },
     { size: "23", peak: "11.0 ± 4.0", mean: "7.2 ± 2.5", eoa: "1.7 ± 0.3" },

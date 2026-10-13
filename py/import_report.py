@@ -65,7 +65,9 @@ LABELS = {
         "Bal pitvar": ("pair", "la_1", "la_2", "*"), "Jobb pitvar": ("pair", "ra_1", "ra_2", "*"),
     },
     "Mitrális billentyű": {
-        **_plain("mi", "mr_vc", "mv_lvot_vti", "vena_pulm_flow", "mv_grad", "mva_vti", "mva_pht", "mv_pht", "mva"),
+        **_plain("mi", "mr_vc", "mv_lvot_vti", "vena_pulm_flow", "mv_grad", "mva_vti", "mva_pht", "mv_pht", "mva",
+                 "mv_peak_e", "mv_dvi", "mv_eoai"),
+        "EOA": ("field", "mva_vti"),                         # (a mitral prosthesis' MVA (VTI), 2026-10-13)
         **_pisa("mr", "MR"),
     },
     "Tricuspidalis billentyű": {
@@ -103,15 +105,30 @@ MORPH_LINE = {"Mitrális billentyű": ("mv_morph", "mitrális"), "Tricuspidalis 
 
 
 def morph_of(section, line):
+    """The valve look line -> [(key, value), ...]; a prosthesis also gives back its type / valve / size as picked on
+    the page (report.morph_line, 2026-10-13: 'Mechanikus mitrális műbillentyű: On-X 25 mm.', 'TAVI műbillentyű.')."""
     if section not in MORPH_LINE:
         return None
     key, name = MORPH_LINE[section]
     m = re.fullmatch(rf"(Megvastagodott|Meszes) {name} billentyű\.", line)
     if m:
-        return key, m.group(1).lower()
-    if line == f"{name[0].upper()}{name[1:]} műbillentyű." and key != "tv_morph":
-        return key, "műbillentyű"
-    return None
+        return [(key, m.group(1).lower())]
+    if key == "tv_morph":
+        return None
+    pos = "av" if key == "av_morph" else "mv"
+    m = re.fullmatch(rf"(?:(TAVI)|(?:(Mechanikus|Biológiai|Transzkatéteres) {name}|{name[0].upper()}{name[1:]}))"
+                     rf" műbillentyű(?:: (.+?))?\.", line)
+    if not m or (m.group(1) and pos != "av"):
+        return None
+    out = [(key, "műbillentyű")]
+    kind = m.group(1) or m.group(2)
+    if kind:
+        out.append((f"valve_{pos}_kind", kind))
+    if m.group(3):
+        valve = re.fullmatch(r"(.+) (\S+) mm", m.group(3))
+        out += ([(f"valve_{pos}", valve.group(1)), (f"valve_{pos}_size", valve.group(2))] if valve
+                else [(f"valve_{pos}", m.group(3))])
+    return out
 
 
 DIM_PREFIX = re.compile(r"^\s*([23])D:\s*")                # "2D: " / "3D: " at the start of an EF or RV line
@@ -323,7 +340,11 @@ def parse(text):
             continue
         look = None if groups.get(section) else morph_of(section, line.strip())   # only the first text line
         if look:
-            r.put(*look)
+            for key, value in look:
+                if key.startswith("valve_"):                 # the picked valve: not a box, not counted
+                    r.values[key] = value
+                else:
+                    r.put(key, value)
             groups[section] = [[]]
             continue
         groups.setdefault(section, [[]])[-1].append(line.strip())
@@ -358,5 +379,6 @@ def import_form(text, place=None):
     note = f"Beolvasott lelet: {got['placed']} érték a mezőkben"
     if got["unplaced"]:
         note += f", {len(got['unplaced'])} sor nem volt besorolható (Egyéb)"
+    valves = {k: v for k, v in got["values"].items() if k.startswith("valve_")}   # back into the valve pickers
     return {"report": out.pop("report"), "form": out, "below": "", "transcript": "", "full_transcript": "",
-            "pauses": [], "timing": {}, "manual": True, "note": note + "."}
+            "pauses": [], "timing": {}, "manual": True, "note": note + ".", "valves": valves}

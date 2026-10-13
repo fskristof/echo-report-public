@@ -270,8 +270,8 @@ class Report:
                 continue
             # SAFETY RULE: a number that was never said never goes into the report.
             if not self.was_heard(key, value):
-                self.warn(f"{self.label(key)}: „{value}” nem hangzik el az átiratban, "
-                                     f"ezért kihagyva. Ellenőrizd!", key=key)
+                self.warn(f"{self.label(key)}: „{value}” nem található az átiratban, de az AI "
+                                     f"ehhez a mezőhöz társította. Kihagyva, ellenőrizd!", key=key)
                 continue
             value = self.clean_value(key, value, unit_said, evidence)
             if value is None:
@@ -568,12 +568,19 @@ class Report:
             self.calc("padp_grad", 4 * v("pi_ed_vel") ** 2, f"PI ED vel. {self.values['pi_ed_vel']} m/s")
 
         # 4.8 From the echo calculator (inputs typed on the page)
-        if v("mv_pht"):
+        mitral_prosthesis = self.values.get("mv_morph") == "műbillentyű"
+        if v("mv_pht") and not mitral_prosthesis:     # 220 / PHT overestimates a prosthesis' EOA (Zoghbi 2024): no MVA
             self.calc("mva_pht", 220 / v("mv_pht"), f"220 / MV PHT {self.values['mv_pht']} ms")
         if lvot_area and v("mv_vti_cw"):
             self.calc("mva_vti", lvot_area * v("lvot_vti") / v("mv_vti_cw"),
                       f"LVOT Diam {self.values['lvot_diam']} mm, LVOT VTI {self.values['lvot_vti']} cm, "
                       f"MV VTI (CW) {self.values['mv_vti_cw']} cm")
+        # 4.14 Mitral prosthesis (2026-10-13, page only): DVI = MV VTI (CW) / LVOT VTI, EOAi = EOA (MVA (VTI)) / BSA
+        if mitral_prosthesis and v("mv_vti_cw") and v("lvot_vti"):
+            self.calc("mv_dvi", v("mv_vti_cw") / v("lvot_vti"),
+                      f"MV VTI (CW) {self.values['mv_vti_cw']} / LVOT VTI {self.values['lvot_vti']}")
+        if mitral_prosthesis and x("mva_vti") and x("bsa"):
+            self.calc("mv_eoai", x("mva_vti") / x("bsa"), f"EOA {self.shown('mva_vti')} cm2, BSA {self.shown('bsa')} m2")
         if v("mv_vti_pw") and v("lvot_vti"):
             self.calc("mv_lvot_vti", v("mv_vti_pw") / v("lvot_vti"),
                       f"MV VTI (PW) {self.values['mv_vti_pw']} / LVOT VTI {self.values['lvot_vti']}")
@@ -807,7 +814,14 @@ class Report:
     def mva_rows(self):
         """Mitral stenosis, as on the page's card (template.md, 2026-10-01): the gradient and MV PHT
         on one row, under them the MVA from VTI (or a plain MVA) and the MVA from PHT. An empty row
-        is left out; a plain MVA next to an MVA (VTI) gets its own row (nothing is dropped)."""
+        is left out; a plain MVA next to an MVA (VTI) gets its own row (nothing is dropped).
+        A mitral prosthesis (2026-10-13, template.md 4.14): gradient | MV PHT, EOA | EOAi, Peak E | MV DVI (the MVA (VTI)
+        is written as "EOA"; a dictated MVA (PHT) / MVA follow on their own rows)."""
+        if self.values.get("mv_morph") == "műbillentyű":
+            c = self.cell
+            return (self.two_columns([c("mv_grad"), c("mva_vti", "EOA"), c("mv_peak_e")],
+                                     [c("mv_pht"), c("mv_eoai"), c("mv_dvi")], self.profile.cols["mva2"])
+                    + [x for x in (c("mva_pht"), c("mva")) if x])
         mva_vti, mva = self.cell("mva_vti"), self.cell("mva")     # column 46: after "...gradiens: 12,5 Hgmm"
         # the PHT column moves to the left only as a whole, like the LVOT section (2026-10-11)
         return (self.two_columns([self.cell("mv_grad"), mva_vti or mva], [self.cell("mv_pht"), self.cell("mva_pht")],
@@ -912,13 +926,31 @@ class Report:
     # the valve look picked on the page (2026-10-08): the first line of the valve's text; "vékony" is not written
     MORPH = {"mv_morph": "mitrális", "tv_morph": "tricuspidalis", "av_morph": "aorta"}
 
+    # the prosthetic valve's type as picked on the page -> the word in front of the valve's name (2026-10-13)
+    VALVE_KINDS = {"Mechanikus": "mechanikus", "Biológiai": "biológiai", "Transzkatéteres": "transzkatéteres"}
+    VALVE_POS = {"mv_morph": "mv", "av_morph": "av"}
+
     def morph_line(self, key):
-        """'Meszes mitrális billentyű.' / 'Aorta műbillentyű.'; nothing for vékony or an empty picker."""
+        """'Meszes mitrális billentyű.' / 'Aorta műbillentyű.'; nothing for vékony or an empty picker.
+        A prosthesis with its type / valve / size picked on the page (2026-10-13, template.md "Valve look"):
+        'Mechanikus mitrális műbillentyű.', 'TAVI műbillentyű.', 'Biológiai aorta műbillentyű: Perimount 23 mm.'"""
         look, name = self.values.get(key), self.MORPH[key]
         if not look or look == "vékony":
             return []
-        text = f"{name} műbillentyű." if look == "műbillentyű" else f"{look} {name} billentyű."
-        return [text[0].upper() + text[1:]]
+        if look != "műbillentyű":
+            text = f"{look} {name} billentyű."
+            return [text[0].upper() + text[1:]]
+        pos = self.VALVE_POS.get(key)
+        valves = getattr(self, "valves", {})
+        kind = valves.get(f"valve_{pos}_kind", "")
+        if kind == "TAVI" and pos == "av":
+            text = "TAVI műbillentyű"
+        else:
+            text = " ".join(x for x in (self.VALVE_KINDS.get(kind), name, "műbillentyű") if x)
+        valve, size = valves.get(f"valve_{pos}", ""), valves.get(f"valve_{pos}_size", "")
+        if valve:
+            text += f": {valve}" + (f" {size} mm" if size else "")
+        return [text[0].upper() + text[1:] + "."]
 
     def layout(self):
         c = self.cell
@@ -1182,7 +1214,7 @@ FORM_SECTIONS = [
     ("Jobb kamra", ["rv_edd", "rv_esd", "tapse", "fac", "rv_eda", "rv_esa", "tric_smax", "rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"], "jobb_kamra", False),
     ("Pitvarok", ["la_1", "la_2", "ra_1", "ra_2", "lares", "lavi", "lav"], "pitvarok", False),
     ("Mitrális billentyű", ["mv_morph", "mi", "mr_vc", "vena_pulm_flow", "mv_vti_pw", "mv_lvot_vti", "mv_vti_cw", *_pisa("mr"), "mv_grad", "mva_vti",
-                            "mva", "mv_pht", "mva_pht"], "mitralis", True),
+                            "mva", "mv_pht", "mva_pht", "mv_peak_e", "mv_dvi", "mv_eoai"], "mitralis", True),
     ("Tricuspidalis billentyű", ["tv_morph", "ti", "pasp_grad", "rap", "ivc_max", "ivc_min", "tr_vc",
                                  "hep_flow", *_pisa("tr")], "tricuspidalis", True),
     ("Aorta billentyű", ["av_morph", "av_vmax", "av_grad_peak", "av_grad_mean", "ai", "pvl", "ar_vc", "ar_pht", "ao_desc_rev",
@@ -1238,6 +1270,9 @@ def form_data(r):
             "choices": CHOICES}
 
 
+VALVE_KEYS = {f"valve_{pos}{part}" for pos in ("av", "mv") for part in ("", "_size", "_kind")}
+
+
 def live_report(values, texts, egyeb, transcript, ai_texts=None, place=None):
     """The Report built from the page's boxes as edited (calculations and checks done).
     Values marked as calculated are not sent, so they are recalculated here. A calculable box sent EMPTY ("") was
@@ -1265,6 +1300,10 @@ def live_report(values, texts, egyeb, transcript, ai_texts=None, place=None):
             cleaned = r.clean_value(key, value, "", "")
             if cleaned is not None:
                 r.values[key] = cleaned
+    # the prosthetic valves picked on the page (valve_av / valve_mv + _size / _kind; not boxes): only for the valve's
+    # first line in the report (morph_line); one short line each
+    r.valves = {k: " ".join(v.split())[:80] for k, v in values.items()
+                if k in VALVE_KEYS and isinstance(v, str) and v.strip()}
     r.texts = {k: v.strip() for k, v in texts.items() if v and v.strip()}
     r.egyeb = [line.strip() for line in (egyeb or "").strip().splitlines()]    # empty rows between lines stay
     r.calculate()

@@ -21,7 +21,8 @@ def render(d):
 def velemeny(d):
     """The Vélemény button: the generated text for the boxes as they are now (template.md 5d)."""
     r = live_report(d.get("values", {}), d.get("texts", {}), d.get("egyeb", ""), d.get("transcript", ""))
-    return 200, {"text": generate_velemeny(r, d.get("sex", "ffi"), d.get("grades", {}), d.get("prosthetic"))}
+    return 200, {"text": generate_velemeny(r, d.get("sex", "ffi"), d.get("grades", {}), d.get("prosthetic"),
+                                           d.get("mitral_prosthetic"))}
 
 
 def import_report(d):
