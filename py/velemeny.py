@@ -250,9 +250,9 @@ def rv_sentence(r):
     longitudinal = None                          # TAPSE ≥ 17 mm and S' ≥ 9,5 cm/s
     if tapse is not None or smax is not None:
         longitudinal = (tapse is None or tapse >= 17) and (smax is None or smax >= 9.5)
-    radial = None                                # the diameter shortens by at least 1/3
-    if edd and esd is not None:
-        radial = (edd - esd) / edd >= 1 / 3
+    radial = None                                # the diameter shortens by at least 10 mm or 1/3
+    if edd and esd is not None:                  # (10 mm: a dilated RV, e.g. 44/30, still contracts well)
+        radial = edd - esd >= 10 - 1e-9 or (edd - esd) / edd >= 1 / 3
     if fac is not None and fac < 35:
         longitudinal = radial = False            # FAC < 35 %: csökkent globális funkció
 
