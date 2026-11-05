@@ -5,7 +5,8 @@ Each field has:
   key    short internal name (what the AI fills in)
   label  how it is written in the report
   unit   unit written after the value ("" = none)
-  kind   "num" number, "grade" (MI/TI/AI/PI), "choice" (fixed words), "flag" (yes/no)
+  kind   "num" number, "grade" (MI/TI/AI/PI), "choice" (fixed words), "flag" (yes/no),
+         "text" (a few words typed in one line, written as typed: what sport, how much)
   said   how you dictate it; this goes into the AI's instructions
   calc   decimals if the program may calculate it (template.md 4.7), else None
   ai     False = typed on the page only; not in the AI's instructions yet (a new field goes to
@@ -65,9 +66,13 @@ def tdi(side, side_hu):
 FIELDS = [
     # --- Header -------------------------------------------------------------------
     Field("hr", "HR", "/min", "num", "HR, pulzus, frekvencia"),
+    # blood pressure (2026-11-05, typed on the page only): "Vérnyomás: 120/80 Hgmm", next to HR
+    Field("bp_sys", "Systolés vérnyomás", "Hgmm", "num", "systolic blood pressure", ai=False),
+    Field("bp_dia", "Diastolés vérnyomás", "Hgmm", "num", "diastolic blood pressure", ai=False),
     Field("ts", "TS", "kg", "num", "testsúly"),
     Field("tm", "TM", "m", "num", "testmagasság, magasság; usually in cm (178): give it as dictated"),
     Field("bsa", "BSA", "m2", "num", "BSA", calc=2),
+    # (PM = pacemaker, HM = HeartMate: typed on the page only, 2026-11-05; the AI's description is unchanged)
     Field("device", "Eszköz", "", "choice", "ECMO / LVAD / RVAD: the device whose flow is dictated"),
     Field("device_flow", "Flow", "liter/min", "num", "the device's flow, e.g. 'RVAD flow 4,9 liter per perc'"),
     Field("device_rpm", "RPM", "RPM", "num", "the device's RPM"),
@@ -87,6 +92,10 @@ FIELDS = [
     Field("pvc", "Extrasystoles", "", "flag", "ticked on the page: frequent extrasystoles during the exam", ai=False),
     Field("bedside", "Bedside", "", "flag", "ticked on the page", ai=False),
     Field("suboptimal", "Szuboptimális echoablak", "", "flag", "ticked on the page", ai=False),
+    # sport (2026-11-05): a tick, and when ticked a small box for what kind and how much; written in the report
+    # ("Sport: futás, heti 3 x 10 km"), unlike the ticks above
+    Field("sport", "Sport", "", "flag", "ticked on the page", ai=False),
+    Field("sport_text", "Sport (milyen, mennyi)", "", "text", "typed on the page", ai=False),
 
     # --- Bal kamra ----------------------------------------------------------------
     Field("lv_edd", "LV EDD", "mm", "num", "LV EDD; 1st number of 'bal kamra X per Y'"),
@@ -125,6 +134,10 @@ FIELDS = [
     Field("rv_eda", "RVEDA", "cm2", "num", "RV end-diastolic area", ai=False),
     Field("rv_esa", "RVESA", "cm2", "num", "RV end-systolic area", ai=False),
     Field("tric_smax", "Tricuspidalis Smax", "cm/s", "num", "tricuspidalis Smax, S max"),
+    # RV strain (2026-11-05, typed on the page only): negative like the LV GLS; the row above the 3D row
+    Field("rv_fwls", "RV FWLS", "%", "num", "RV free wall longitudinal strain", ai=False),
+    Field("rv_sls", "RV septal strain", "%", "num", "RV septal longitudinal strain", ai=False),
+    Field("rv_gls", "RV GLS", "%", "num", "RV global longitudinal strain", ai=False),
     # RV 3D volumetry (2026-10-08, typed on the page only)
     Field("rv3d_ef", "RV EF", "%", "num", "RV 3D EF", calc=0, ai=False),
     Field("rv3d_edv", "RV EDV", "ml", "num", "RV 3D EDV", ai=False),
@@ -136,9 +149,21 @@ FIELDS = [
     Field("la_2", "Bal pitvar (2.)", "mm", "num", "2nd number of 'bal pitvar X x Y'"),
     Field("ra_1", "Jobb pitvar (1.)", "mm", "num", "1st number of 'jobb pitvar X x Y' (also 'a jobb' right after the left atrium)"),
     Field("ra_2", "Jobb pitvar (2.)", "mm", "num", "2nd number of 'jobb pitvar X x Y'"),
-    Field("lav", "LAV", "ml", "num", "LAV"),          # not written in the report: only for LAVi
+    # LAV: not written in the report, only for LAVi. It is the same volume as LA ESV (the LA's largest volume, at the
+    # end of LV systole): one is copied into the other when only one is there (template.md 4.15, 2026-11-05)
+    Field("lav", "LAV", "ml", "num", "LAV", calc=0),
     Field("lavi", "LAVi", "ml/m2", "num", "LAVi", calc=0),
-    Field("lares", "LARes", "%", "num", "LA reservoir strain, always positive", ai=False),
+    # LA strain (2026-11-05: LARes renamed LASr, conduit and contractile added; typed on the page only). LASr is
+    # positive; LAScd / LASct are usually written negative; |LAScd| + |LASct| is about LASr (checked in report.py)
+    Field("lares", "LASr", "%", "num", "LA reservoir strain, always positive", ai=False),
+    Field("la_cd", "LAScd", "%", "num", "LA conduit strain", ai=False),
+    Field("la_ct", "LASct", "%", "num", "LA contractile strain", ai=False),
+    # LA volumetry (2026-11-05, typed on the page only; not used routinely, LAVi is): EDV = the smallest LA volume (end
+    # of LV diastole), ESV = the largest (end of LV systole, = LAV); SV = ESV - EDV, EF = SV / ESV (template.md 4.15)
+    Field("la_edv", "LA EDV", "ml", "num", "LA volume at LV end-diastole (smallest)", ai=False),
+    Field("la_esv", "LA ESV", "ml", "num", "LA volume at LV end-systole (largest, = LAV)", calc=0, ai=False),
+    Field("la_sv", "LA SV", "ml", "num", "LA ESV - LA EDV", calc=0, ai=False),
+    Field("la_ef", "LA EF", "%", "num", "LA emptying fraction", calc=0, ai=False),
 
     # --- Mitrális billentyű ---------------------------------------------------------
     # the valve's look, picked in the card's title on the page (2026-10-08): the first line of the valve text in the
@@ -254,14 +279,16 @@ TEXT_SECTIONS = {
 }
 
 # Free text typed on the page only (not yet filled by the AI): written after the section's values
-PAGE_TEXTS = ("bal_kamra", "jobb_kamra", "pitvarok", "velemeny")   # bal_kamra: other LV remarks (after the wall
-                                                                   # motion text); velemeny: the opinion, at the end
+PAGE_TEXTS = ("fejlec", "bal_kamra", "jobb_kamra", "pitvarok", "velemeny")   # fejlec: a remark in the header
+                                                                   # (2026-11-05); bal_kamra: other LV remarks (after the
+                                                                   # wall motion text); velemeny: the opinion, at the end
 
 # Allowed words for "choice" fields (the report uses exactly these spellings)
 CHOICES = {
-    "device": ["ECMO", "LVAD", "RVAD"],
-    "device_2": ["ECMO", "LVAD", "RVAD"],
-    "device_3": ["ECMO", "LVAD", "RVAD"],
+    # PM = pacemaker, HM = HeartMate (2026-11-05): no flow / RPM boxes for PM
+    "device": ["ECMO", "LVAD", "RVAD", "HM", "PM"],
+    "device_2": ["ECMO", "LVAD", "RVAD", "HM", "PM"],
+    "device_3": ["ECMO", "LVAD", "RVAD", "HM", "PM"],
     "ao_desc_rev": ["van", "nincs"],
     "mv_morph": ["vékony", "megvastagodott", "meszes", "műbillentyű"],   # műbillentyű: the mitral prosthesis part comes later
     "tv_morph": ["vékony", "megvastagodott", "meszes"],
@@ -269,6 +296,11 @@ CHOICES = {
     "hep_flow": ["normál", "S-blunting", "systolés reverse flow"],
     "vena_pulm_flow": ["normál", "S-blunting", "systolés reverse flow"],
 }
+
+# Devices that have a flow and an RPM (the page shows those two boxes only for these; a pacemaker has neither)
+PUMPS = ("ECMO", "LVAD", "RVAD", "HM")
+# Strain values that are negative (a missing minus gets a warning, the page adds it, with undo)
+NEGATIVE_STRAIN = ("gls", "rv_fwls", "rv_sls", "rv_gls")
 
 # Grades as dictated (Arabic numbers) -> as written (Roman numerals)
 ROMAN = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI"}

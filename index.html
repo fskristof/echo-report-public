@@ -450,6 +450,30 @@
   .slot:not(.choice) { padding-right: 4px; }
   .slot.choice { flex: none; padding-right: 0; }          /* as wide as its longest choice */
   .slot.tick { background: transparent; padding: 0 2px; }   /* a tick box (header): no filled box around it */
+  /* the tick box before its label (2026-11-05): the box in the label's place, the label after it */
+  .cell.tick-first > .cell-body { grid-column: 1; grid-row: 1; }
+  .cell.tick-first > .cell-label { grid-column: 2 / -1; grid-row: 1; padding: 0 0 0 4px; margin: 0; cursor: pointer; }
+  .cell.tick-first > .cell-act { display: none; }
+  /* a few words in one line (what sport, how much): a wide box, no label (its tick says what it is) */
+  .cell.textcell > .cell-label, .cell.textcell > .cell-act { display: none; }
+  .cell.textcell > .cell-body { grid-column: 1 / -1; }
+  .slot.text input { width: 12rem; flex-basis: 12rem; padding-top: 3px; padding-bottom: 3px; }
+  .cell.dep-hidden { display: none !important; }      /* shown only with its tick / device (or a value): DEPENDS_ON */
+  /* Fejléc (2026-11-05): name + TAJ and the HR row on the left, the tick boxes on the right in 3 rows (column by column),
+     starting level with the name row; when both don't fit side by side, the ticks go under them (arrangeHeader) */
+  .head-top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 28px; }
+  .head-left { flex: 1 0 auto; min-width: 0; }
+  .head-left > .patient-line { margin-bottom: 8px; }
+  .line.head-ticks { flex: 0 0 auto; padding: 0; }
+  .line.head-ticks > .flow { display: grid; grid-auto-flow: column; grid-template-rows: repeat(3, auto);
+                             column-gap: 18px; row-gap: 5px; align-items: center; justify-content: start; }
+  /* Sport and its box (what kind, how much) in one place, the box level with the label */
+  .sport-pair { display: flex; align-items: center; gap: 8px; }
+  .sport-pair > .cell { grid-template-columns: max-content max-content max-content; }
+  /* Sport not ticked: its box keeps its room (invisible), so the tick boxes never move when Sport is ticked */
+  .sport-pair > .cell.textcell.dep-hidden { display: grid !important; visibility: hidden; }
+  .sport-pair .slot.text { padding-top: 0; padding-bottom: 0; margin: -6px 0; }   /* overhangs its row a little: the
+                                                                                     three tick rows stay evenly spaced */
   .slot.tick input { width: 1.05rem; height: 1.05rem; flex: none; min-width: 0; padding: 0; margin: 0;
                      accent-color: var(--accent); cursor: pointer; }
   .slot select { width: auto; flex: 0 0 auto; appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
@@ -736,7 +760,7 @@
     .bar { background: var(--bg); }
   }
 </style>
-<meta name="echocore-version" content="0af427a, 2026-10-16">
+<meta name="echocore-version" content="03ddb5e, 2026-11-05">
 <script src="pyodide/pyodide.js"></script>
 <script src="static-api.js"></script>
 </head>
@@ -1132,9 +1156,10 @@ function showResult(s) {
 /* Two slips are fixed straight away (template.md §5 and §5b):
    - a decimal with 2+ decimal digits in a whole-number box: the comma is removed
      ("DT 2,14 ms" → 214; same digits, nothing new)
-   - GLS dictated without the minus: the minus is added (18 → -18)
+   - GLS (or an RV strain: FWLS, septal, RV GLS) without the minus: the minus is added (18 → -18)
    The box stays orange and says what was changed, with a button to undo it. Only once, when
    the result arrives. Other suggestions (e.g. a lost "egész") stay one-click buttons. */
+const NEGATIVE_STRAIN = new Set(["gls", "rv_fwls", "rv_sls", "rv_gls"]);   // as fields.NEGATIVE_STRAIN
 function applyAutoFixes(flags) {
   for (const flag of flags) {
     const field = flag.key && state.fields[flag.key];
@@ -1142,7 +1167,7 @@ function applyAutoFixes(flags) {
     if (state.autoFlags.some((a) => a.key === flag.key)) continue;
     const from = field.input.value;
     const commaSlip = flag.suggestion === (from.replace(",", "").replace(/^0+(?=\d)/, ""));
-    const glsMinus = flag.key === "gls" && flag.suggestion === "-" + from;
+    const glsMinus = NEGATIVE_STRAIN.has(flag.key) && flag.suggestion === "-" + from;   // GLS, RV strains
     if (!from || !(commaSlip || glsMinus)) continue;                     // only these two
     let reason = flag.text;
     if (reason.startsWith(field.label + ":")) reason = reason.slice(field.label.length + 1).trim();
@@ -1240,12 +1265,14 @@ const BADGE = (key) => ({ badgeOf: key });   // a box's severity badge in its ow
 const GAPS = (gaps, ...lines) => ({ group: lines, gaps });   // a block with its own gaps between the columns
                                                              // (planned in /layout: more room in Bal kamra …)
 const LAYOUT = {
-  // first row: the tick boxes (Vélemény's first sentence) close up to the right of HR / TS / TM / BSA
-  // (name + TAJ above it: makePatientLine, page only); TM before TS on the page, the report keeps HR TS TM BSA
-  "Fejléc": [G(["hr", "tm", "ts", "bsa", F("supine", "ventilated", "afib", "pvc", "bedside", "suboptimal")]),
+  // first row: HR · Vérnyomás (2026-11-05) · TM · TS · BSA (name + TAJ above it: makePatientLine, page only);
+  // second row: the tick boxes (Vélemény's first sentence; the box before its label), Sport + its box (what, how much:
+  // shown while Sport is ticked); the header's text box last (2026-11-05, written at the end of the report's header)
+  "Fejléc": [G(["hr", P("bp_sys", "bp_dia", "/", "Vérnyomás"), "tm", "ts", "bsa"]),
+             C("supine", "ventilated", "afib", "pvc", "bedside", "suboptimal", "sport", "sport_text"),
              SUB("Eszköz", ["device", "device_flow", "device_rpm"],      // closed; opens by itself with a device
                  MORE("device_2", "device_2_flow", "device_2_rpm"), MORE("device_3", "device_3_flow", "device_3_rpm")),
-             OFF("cvp")],
+             OFF("cvp"), "text"],
   "Bal kamra": [GAPS(["38px", "62px"], S(["lv_edd", "lv_esd"], ["septum", "hatso_fal"],   // empty boxes close up
                                       ["ao_annulus", "sinus_valsalva", "ao_ascendens"])),
                 // "2D:" line; "3D EF hozzáadása" (end of it) opens the "3D:" line under it (shown anyway with a value)
@@ -1258,11 +1285,16 @@ const LAYOUT = {
   "Jobb kamra": [GAPS(["102px"], [P("rv_edd", "rv_esd", "/", "RV EDD / ESD"),
                                   POP("fac", ["rv_eda", "rv_esa"], "FAC = (RVEDA − RVESA) / RVEDA × 100")],
                       ["tapse", "tric_smax"]),
-                 SUB("3D volumetria", C("rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"))],   // closed unless it has a value
+                 // closed unless it has a value; the strain row above the 3D row (2026-11-05), titles lined up
+                 SUB("Strain és 3D volumetria", G(H("Strain:", "rv_fwls", "rv_sls", "rv_gls"),
+                                                  H("3D:", "rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv")))],
   "Pitvarok": [GAPS(["126px"], [P("la_1", "la_2", "×", "Bal pitvar"), P("ra_1", "ra_2", "×", "Jobb pitvar")]),
-               // LAV | LAVi in the middle | LARes, the row ending under Jobb pitvar's end (its own gaps: the
-               // pair above is too wide to share columns). LAV: typed for LAVi, not written in the report.
-               GAPS(["75px", "75px"], ["lav", "lavi", "lares"])],
+               // LAV | LAVi (LAV: typed for LAVi, not written in the report; the same volume as LA ESV below)
+               GAPS(["75px"], ["lav", "lavi"]),
+               // a part that folds open (2026-11-05), closed unless it has a value: the LA strain (LASr = the former
+               // LARes, LAScd, LASct), under it the LA volumes (LA SV and LA EF calculated; template.md 4.15)
+               SUB("Strain és volumetria", G(H("Strain:", "lares", "la_cd", "la_ct"),
+                                             H("Volumetria:", "la_edv", "la_esv", "la_sv", "la_ef")))],
   // valve cards: the regurgitation part holds the PISA boxes (left, under a small "PISA" title) and the
   // other regurgitation values (right column); the valve's text at the bottom (in the report: on top)
   "Mitrális billentyű": [["mi"],
@@ -1315,6 +1347,8 @@ const SHORT_LABELS = { mv_grad: "MV átlag grad.",                   // too long
   tdi_med_s: "S", tdi_med_e: "E'", tdi_med_a: "A'", tdi_med_ee: "E/E'",
   lv3d_ef: "EF", lv3d_edv: "EDV", lv3d_esv: "ESV", lv3d_sv: "SV", lv_sv: "SV",   // the "2D:" / "3D:" title says the rest
   rv3d_ef: "EF", rv3d_edv: "EDV", rv3d_esv: "ESV", rv3d_sv: "SV",                  // (the part's title: "3D volumetria")
+  rv_fwls: "FWLS", rv_sls: "Septal strain", rv_gls: "GLS",                          // RV strain: the part says RV
+  la_edv: "EDV", la_esv: "ESV", la_sv: "SV", la_ef: "EF",                            // LA volumes: the line says it
   ...Object.fromEntries(["mr", "tr", "ar"].flatMap((p) =>
     Object.entries(PISA_LABELS).map(([part, label]) => [`${p}_${part}`, label]))) };
 // a choice shown shorter in its box (the report still writes the full text), so the box is narrower
@@ -1323,6 +1357,7 @@ const SHORT_CHOICES = { "systolés reverse flow": "systolés reverse" };
 // V. pulm. flow under MR VC, V. hep. flow, Ao. desc. rev. flow
 const ALWAYS_SHOWN = new Set(["vena_pulm_flow", "hep_flow", "ao_desc_rev"]);
 const TEXT_LABELS = { falmozgas: "Falmozgászavar",      // other texts: the card's title says what it is
+                      fejlec: "Megjegyzés",
                       bal_kamra: "Egyéb megjegyzés" };
 const NARROW_TEXTS = new Set(["falmozgas", "bal_kamra"]);
 const MIN_ROWS = { falmozgas: 2, bal_kamra: 2, velemeny: 3 };
@@ -1482,6 +1517,7 @@ function buildForm(form, manual = false) {
       });
       card.querySelector(".sec-head").appendChild(more);
     }
+    if (sec.title === "Fejléc") arrangeHeader(card);
     root.appendChild(card);
   }
   arrange();
@@ -1502,6 +1538,7 @@ function buildForm(form, manual = false) {
     if (mvMorph.input.value === "műbillentyű") setMitralProsthetic(true);
   }
   refreshPvl();
+  refreshDepends();
   $("egyeb").value = form.egyeb;
   $("egyeb").oninput = () => { autoGrow($("egyeb")); scheduleRender(); };
   refit();
@@ -1522,6 +1559,26 @@ function makePatientLine() {
     line.appendChild(lab);
   }
   return line;
+}
+
+/* Fejléc (2026-11-05): name + TAJ and the HR row on the left, the tick boxes on the right (3 rows, level with the name
+   row), to save height; Sport and its box stay together in one place */
+function arrangeHeader(card) {
+  const ticks = state.fields.supine && state.fields.supine.cell.closest(".line");
+  const hrBlock = state.fields.hr && state.fields.hr.cell.closest(".boxgrid");
+  if (!ticks || !hrBlock) return;
+  const patient = card.querySelector(".patient-line");
+  const top = el("div", "head-top"), left = el("div", "head-left");
+  (patient || hrBlock).before(top);
+  left.append(...[patient, hrBlock].filter(Boolean));
+  ticks.classList.add("head-ticks");
+  top.append(left, ticks);
+  const sport = state.fields.sport && state.fields.sport.cell, text = state.fields.sport_text && state.fields.sport_text.cell;
+  if (sport && text) {
+    const pair = el("div", "sport-pair");
+    sport.before(pair);
+    pair.append(sport, text);
+  }
 }
 
 /* "3D EF hozzáadása" (grey, end of the 2D EF line): opens the 3D EF / EDV / ESV line under it. The 3D line is shown
@@ -1557,6 +1614,24 @@ function refreshPvl() {
   // MVA (PHT): not for a mitral prosthesis (220 / PHT overestimates its EOA); a dictated value stays visible
   const m = state.fields.mva_pht;
   if (m) m.cell.classList.toggle("pv-hidden", mpv.on && !m.input.value.trim());
+}
+
+/* Boxes that show only when another box says so (2026-11-05); a box with a value always stays visible:
+   - Sport's box (what kind, how much): while Sport is ticked
+   - Flow and RPM of a device: only for a pump (ECMO, LVAD, RVAD, HM), not for a pacemaker or an empty device box */
+const PUMPS = ["ECMO", "LVAD", "RVAD", "HM"];
+const isPump = (key) => () => PUMPS.includes(state.fields[key] ? state.fields[key].input.value : "");
+const DEPENDS_ON = { sport_text: () => !!(state.fields.sport && state.fields.sport.input.checked),
+  ...Object.fromEntries(["", "_2", "_3"].flatMap((n) => [[`device${n}_flow`, isPump(`device${n}`)],
+                                                          [`device${n}_rpm`, isPump(`device${n}`)]])) };
+const DEPENDS_ON_KEYS = new Set(["sport", "device", "device_2", "device_3"]);   // the boxes that decide
+function refreshDepends(focusKey) {
+  for (const [key, shown] of Object.entries(DEPENDS_ON)) {
+    const f = state.fields[key];
+    if (f) f.cell.classList.toggle("dep-hidden", !shown() && !f.input.value.trim());
+  }
+  if (focusKey && state.fields[focusKey]) state.fields[focusKey].input.focus();   // Sport ticked: type what it is
+  refit();
 }
 
 /* "+" next to Eszköz: opens the next device line (a patient can have up to 3 devices; each is
@@ -1901,6 +1976,11 @@ function makeCell(spec, byKey, choices, flags) {
   const pair = fields.length > 1;                    // a pair (48 × 57) or a triple (80 / 60 = 25 %)
   const cell = el("div", "cell" + (pair ? " pair" : "") + (spec.span ? " span2" : ""));
   if (ALWAYS_SHOWN.has(fields[0].key)) cell.dataset.always = "1";    // typed-only boxes: visible in an open part
+  if (!pair && fields[0].kind === "flag") cell.classList.add("tick-first");   // the tick box before its label
+  if (!pair && fields[0].kind === "text") {                                   // a few words: a wide box, no label;
+    cell.classList.add("textcell");                                           // never hidden as "empty" (DEPENDS_ON
+    cell.dataset.always = "1";                                                // decides when it shows)
+  }
   const label = el("label", "cell-label", (pair && spec.label) || SHORT_LABELS[fields[0].key] || fields[0].label);
   label.htmlFor = "f-" + fields[0].key;
   label.title = pair ? fields.map((f) => f.label).join(" / ") : fields[0].label;
@@ -2098,6 +2178,7 @@ function romanGrade(key) {                  // typed "2" or "1-2": shown as "II"
 function makeSlot(f, choices, { cell, act, notes, flags, unit, prefix }) {
   const isSelect = f.kind === "choice", isTick = f.kind === "flag";
   const slot = el("div", "slot" + (f.value ? "" : " empty") + (isSelect ? " choice" : "") + (isTick ? " tick" : "") +
+                         (f.kind === "text" ? " text" : "") +
                          (f.kind === "grade" ? " gradebox" : ""));
   slot.dataset.key = f.key;
   let input;
@@ -2113,6 +2194,7 @@ function makeSlot(f, choices, { cell, act, notes, flags, unit, prefix }) {
   } else {
     input = el("input"); input.type = "text"; input.spellcheck = false;
     input.autocomplete = "off"; input.name = "echo-" + f.key;      // no Chrome history list over the grade picker
+    if (f.kind === "text") { input.placeholder = "milyen sport, mennyi"; input.setAttribute("aria-label", f.label); }
   }
   input.id = "f-" + f.key; input.value = f.kind === "grade" ? gradeInBox(f.value) : f.value;
   if (prefix) input.setAttribute("aria-label", f.label);
@@ -2124,6 +2206,7 @@ function makeSlot(f, choices, { cell, act, notes, flags, unit, prefix }) {
     markTyped(f.key);
     if (f.key === "pvl") refreshPvl();
     if (isTick) slot.classList.toggle("empty", !input.checked);       // counts as filled only while ticked
+    if (DEPENDS_ON_KEYS.has(f.key)) refreshDepends(f.key === "sport" && input.checked ? "sport_text" : null);
     scheduleRender();
   });
   if (f.kind === "grade") input.addEventListener("change", () => romanGrade(f.key));

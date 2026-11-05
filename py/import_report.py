@@ -7,7 +7,7 @@ Nothing is invented: a line or an item that cannot be placed goes to Egyéb (the
 
     parse(text) -> {"values": {...}, "texts": {...}, "egyeb": "...", "placed": n, "unplaced": [...]}
 
-What a report cannot give back: the header tick boxes (Háton fekvő ...), values that are not written
+What a report cannot give back: the header tick boxes (Háton fekvő ...; Sport is written, so it comes back), values that are not written
 in the report (CVP, LAV, MV VTI PW ...). Free text comes back line by line as it was wrapped; the
 first text group of Bal kamra is the wall motion text, any later group the "Egyéb megjegyzés".
 Tests: python test_import.py
@@ -21,7 +21,9 @@ SEPARATOR = re.compile(r"^-{3}\s+(.+?)\s+-{3,}\s*$")      # "--- Bal kamra -----
 PLAIN_SEPARATOR = re.compile(r"^-{10,}\s*$")                # a separator without a title (older layout)
 
 NUM = r"-?\d+(?:,\d+)?"
-DEVICE_LINE = re.compile(r"^(ECMO|LVAD|RVAD|Eszköz) flow:\s*(.*)$")
+DEVICE_LINE = re.compile(r"^(ECMO|LVAD|RVAD|HM|PM|Eszköz) flow:\s*(.*)$")
+DEVICE_NAME_LINE = re.compile(r"^Eszköz:\s*(ECMO|LVAD|RVAD|HM|PM)$")        # a device without flow (2026-11-05)
+SPORT_LINE = re.compile(r"^Sport:\s*(.+)$")                                # "Sport: futás" / "Sport: igen"
 RESP_LINE = re.compile(r"^(Mitrális|Tricuspidalis) beáramlás légzésszinkron ingadozás:\s*(.*)$")
 TDI_LINE = re.compile(r"^Mitralis annulus (lateralis|medialis) TDI\b\s*")
 TDI_SUBS = {"S": "s", "E'": "e", "A'": "a", "E/E'": "ee"}
@@ -29,7 +31,7 @@ PISA_SHORT = {"Rad.": "rad", "ERO": "ero", "Reg. vol.": "regvol", "Reg. frakció
               "Vmax": "vmax", "VTI": "vti", "A. vel.": "avel"}
 
 # Which part of the report a title is, and which text box its free text goes to
-TEXT_KEY = {"Jobb kamra": "jobb_kamra", "Pitvarok": "pitvarok", "Mitrális billentyű": "mitralis",
+TEXT_KEY = {"Fejléc": "fejlec", "Jobb kamra": "jobb_kamra", "Pitvarok": "pitvarok", "Mitrális billentyű": "mitralis",
             "Tricuspidalis billentyű": "tricuspidalis", "Aorta billentyű": "aorta",
             "Pulmonalis billentyű": "pulmonalis", "Pericardium": "pericardium"}
 
@@ -48,7 +50,10 @@ def _pisa(prefix, valve):
 
 # label in the report -> how to read the value, per part
 LABELS = {
-    "Fejléc": _plain("hr", "ts", "tm", "bsa"),
+    "Fejléc": {
+        **_plain("hr", "ts", "tm", "bsa", "bp_dia"),
+        "Vérnyomás": ("pair", "bp_sys", "bp_dia", "/"),       # "Vérnyomás: 120/80 Hgmm" (2026-11-05)
+    },
     "Bal kamra": {
         **_plain("lv_edd", "lv_esd", "septum", "hatso_fal", "ao_annulus", "sinus_valsalva", "ao_ascendens",
                  "ef", "edv", "esv", "gls", "dt"),
@@ -57,11 +62,13 @@ LABELS = {
         **{sub: ("tdisub", code) for sub, code in TDI_SUBS.items()},
     },
     "Jobb kamra": {
-        **_plain("tapse", "fac", "tric_smax", "rv3d_edv", "rv3d_esv", "rv3d_ef", "rv3d_sv"),   # (the RV 3D line: "3D: RV EDV: ...")
+        **_plain("tapse", "fac", "tric_smax", "rv3d_edv", "rv3d_esv", "rv3d_ef", "rv3d_sv",   # (the RV 3D line: "3D: RV EDV: ...")
+                 "rv_fwls", "rv_sls", "rv_gls"),                                              # RV strain (2026-11-05)
         "RV EDD/ESD": ("pair", "rv_edd", "rv_esd", "/"), "RV EDD": ("field", "rv_edd"), "RV ESD": ("field", "rv_esd"),
     },
     "Pitvarok": {
-        **_plain("lavi", "lares"),
+        **_plain("lavi", "lares", "la_cd", "la_ct", "la_edv", "la_esv", "la_sv", "la_ef"),
+        "LARes": ("field", "lares"),                         # (LASr's name before 2026-11-05: older reports)
         "Bal pitvar": ("pair", "la_1", "la_2", "*"), "Jobb pitvar": ("pair", "ra_1", "ra_2", "*"),
     },
     "Mitrális billentyű": {
@@ -238,6 +245,18 @@ class Reader:
             m = DEVICE_LINE.match(stripped)
             if m:
                 return self.device(m)
+            m = DEVICE_NAME_LINE.match(stripped)
+            if m:
+                n = ["", "_2", "_3"][min(self.devices, 2)]
+                self.devices += 1
+                self.put(f"device{n}", m.group(1))
+                return True
+            m = SPORT_LINE.match(stripped)
+            if m:
+                self.put("sport", "igen")
+                if m.group(1).strip() != "igen":
+                    self.put("sport_text", m.group(1).strip())
+                return True
         if section == "Pericardium":
             m = RESP_LINE.match(stripped)
             if m:

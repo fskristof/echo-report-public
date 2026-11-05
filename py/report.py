@@ -15,7 +15,7 @@ import textwrap
 import unicodedata
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, localcontext
 
-from fields import CHOICES, FIELD, MAX_GRADE, PAGE_TEXTS, ROMAN
+from fields import CHOICES, FIELD, MAX_GRADE, NEGATIVE_STRAIN, PAGE_TEXTS, PUMPS, ROMAN
 from hu_numbers import words_to_digits
 
 # Where the report is pasted decides the layout (2026-10-02). Column numbers are in "digit widths": in a fixed-width font
@@ -130,7 +130,7 @@ FINDING_WORDS = [
     ("inferoseptalis", r"\binferosept", True),
     ("anterior", r"\banterior", False),
 ]
-SECTION_NAMES = {"falmozgas": "falmozgás", "bal_kamra": "bal kamra", "jobb_kamra": "jobb kamra", "pitvarok": "pitvarok",
+SECTION_NAMES = {"fejlec": "fejléc", "falmozgas": "falmozgás", "bal_kamra": "bal kamra", "jobb_kamra": "jobb kamra", "pitvarok": "pitvarok",
                  "mitralis": "mitrális", "tricuspidalis": "tricuspidalis",
                  "aorta": "aorta", "pulmonalis": "pulmonalis", "pericardium": "pericardium",
                  "egyeb": "egyéb"}
@@ -139,10 +139,11 @@ SECTION_NAMES = {"falmozgas": "falmozgás", "bal_kamra": "bal kamra", "jobb_kamr
 WHOLE_NUMBER_UNITS = {"mm", "ms", "cm/s", "Hgmm", "/min", "kg", "RPM", "%"}
 # Not checked at all: "cm" (LVOT VTI 21,5 cm), "ml" and "ml/m2" (volumes can have decimals;
 # a PISA VTI of "1,1" is caught by the range check instead), and these fields:
-DECIMALS_OK = {"lvot_diam", "rvot_diam", "mv_grad", "gls", "lares",   # LARes: a strain like GLS
+DECIMALS_OK = {"lvot_diam", "rvot_diam", "mv_grad", "gls", "lares",   # LASr (LARes): a strain like GLS
+               "la_cd", "la_ct", "rv_fwls", "rv_sls", "rv_gls",       # the other strains (2026-11-05)
                "mr_rad", "tr_rad", "ar_rad"}             # PISA radius: 6,7 mm is normal
 # Usually whole, rarely not: a decimal gets a yellow "check", never a suggested fix.
-RARELY_DECIMAL = {"ef", "lv3d_ef", "rv3d_ef", "mr_vc", "tr_vc", "ar_vc"}
+RARELY_DECIMAL = {"ef", "lv3d_ef", "rv3d_ef", "la_ef", "mr_vc", "tr_vc", "ar_vc"}
 
 # Plausible ranges set by the doctor (2026-09-28). Outside the range = a "check" flag;
 # the value is never changed. Applies to dictated and calculated values.
@@ -388,6 +389,9 @@ class Report:
         if field.kind == "flag":
             return "igen"
 
+        if field.kind == "text":                     # a few words, written as typed: one line, at most 60 characters,
+            return " ".join(value.split())[:60] or None   # so "Sport: ..." always fits one report row
+
         # Numbers. Strip a unit the AI may have left in the value ("12 mm" -> "12").
         as_given = value
         value = re.sub(r"\s*[a-zA-Z%/]+[0-9]*$", "", value).strip()
@@ -489,6 +493,16 @@ class Report:
         self.exact[key] = value
         self.calculated[key] = f"{self.label(key)}: {text} {unit} ({inputs})".replace("  ", " ")
 
+    def copy_value(self, key, source):
+        """The same measurement in two boxes (LAV = LA ESV, 4.15): an empty one gets the other's value as it is
+        (no rounding, so not through calc()); the page offers it on the ƒx button."""
+        text, inputs = self.values[source], f"= {self.label(source)}"
+        self.calc_options[key] = (text, inputs)
+        if key in self.values or key in self.blank:          # typed, or emptied by hand: left as it is
+            return
+        self.values[key] = text
+        self.calculated[key] = f"{self.label(key)}: {text} {FIELD[key].unit} ({inputs})"
+
     def shown(self, key):
         """A value as an input in a calculation's explanation (Számolt értékek, the box's hover, ƒx): a calculated one
         with one decimal more than in the report, so it shows the unrounded value that was used (ERO 0,185 for the
@@ -505,6 +519,21 @@ class Report:
     def calculate(self):
         v = self.num
         x = self.x                     # for inputs that may themselves be calculated: unrounded
+
+        # 4.15 LA volumes (2026-11-05): LAV and LA ESV are the same volume (the LA's largest): when only one is there,
+        # it is copied into the other as it is (no rounding); both there but different: a warning. Then LA SV = ESV - EDV
+        # and LA EF = SV / ESV x 100 (the LA is largest at the end of LV systole, so ESV > EDV here)
+        for key, source in (("la_esv", "lav"), ("lav", "la_esv")):
+            if source in self.values and source not in self.calculated and v(source) is not None:
+                self.copy_value(key, source)
+        if "lav" in self.values and "la_esv" in self.values and not (self.calculated.keys() & {"lav", "la_esv"}) \
+                and v("lav") != v("la_esv"):
+            self.warn(f"LAV ({self.values['lav']} ml) és LA ESV ({self.values['la_esv']} ml) ugyanaz a térfogat "
+                      f"(a bal pitvar legnagyobb térfogata), de eltérnek. Ellenőrizd!", key="la_esv")
+        if v("la_esv") and v("la_edv") is not None and v("la_esv") > v("la_edv"):
+            inputs = f"LA EDV {self.values['la_edv']} ml, LA ESV {self.values['la_esv']} ml"
+            self.calc("la_sv", v("la_esv") - v("la_edv"), inputs)
+            self.calc("la_ef", (v("la_esv") - v("la_edv")) / v("la_esv") * 100, inputs)
 
         # 4.11 EF and SV from the volumes (2D, 3D, RV 3D; 2026-10-08): SV = EDV - ESV, EF = SV / EDV
         for ef, sv, edv, esv in (("ef", "lv_sv", "edv", "esv"), ("lv3d_ef", "lv3d_sv", "lv3d_edv", "lv3d_esv"),
@@ -888,10 +917,11 @@ class Report:
         return f"E/A: {r}" if r else None
 
     def device(self, n=""):
-        """'ECMO flow: 3,5 liter/min, 3200 RPM' for device n ("", "_2", "_3")."""
+        """'ECMO flow: 3,5 liter/min, 3200 RPM' for device n ("", "_2", "_3"); a device without flow / RPM (a pacemaker,
+        or nothing typed yet): 'Eszköz: PM' (2026-11-05)."""
         flow, rpm = self.values.get(f"device{n}_flow"), self.values.get(f"device{n}_rpm")
         if not (flow or rpm):
-            return None
+            return f"Eszköz: {self.values[f'device{n}']}" if self.values.get(f"device{n}") else None
         name = self.values.get(f"device{n}", "Eszköz")
         parts = ([f"{flow} liter/min"] if flow else []) + ([f"{rpm} RPM"] if rpm else [])
         return f"{name} flow: " + ", ".join(parts)
@@ -899,6 +929,23 @@ class Report:
     def devices(self):
         """Every device on its own line (up to 3; the 2nd and 3rd are added with "+" on the page)."""
         return [d for d in (self.device(n) for n in ("", "_2", "_3")) if d]
+
+    def header_rows(self):
+        """HR TM TS BSA on one row (TM before TS, 2026-10-08). With a blood pressure (2026-11-05) the five don't fit in one
+        row: HR and Vérnyomás on the first, TM TS BSA on the second (in the same columns)."""
+        c, K = self.cell, self.profile.cols["hdr"]
+        bp = self.pair("bp_sys", "bp_dia", "Vérnyomás", "Diastolés vérnyomás", "Vérnyomás", "/", "Hgmm")
+        body = [c("tm"), c("ts"), c("bsa")]
+        if not bp:
+            return self.closeup(K, [c("hr"), *body])
+        return self.closeup(K, [c("hr"), bp]) + self.closeup(K, body)
+
+    def sport(self):
+        """'Sport: futás, heti 3 x 10 km' (2026-11-05); ticked with nothing typed: 'Sport: igen'."""
+        text = self.values.get("sport_text")
+        if text:
+            return [f"Sport: {text}"]
+        return ["Sport: igen"] if self.values.get("sport") else []
 
     def ef_rows(self):
         """The EF row(s), 2026-10-08. The values close up to the left (an empty one leaves no gap): "EF: 52 %   GLS: ...".
@@ -915,9 +962,24 @@ class Report:
                 rows += self.row(*zip(K, cells))
         return rows
 
+    def strain_row(self, keys):
+        """'RV FWLS: -25 %  RV septal strain: -20 %  RV GLS: -22 %' / 'LASr: 35 %  LAScd: -20 %  LASct: -15 %'
+        (2026-11-05): the filled values close up."""
+        return self.closeup(self.profile.cols["rv3d"], [self.cell(k) for k in keys])
+
+    def la_volumes(self):
+        """'LA EDV: 30 ml  LA ESV: 60 ml  LA SV: 30 ml  LA EF: 50 %' (2026-11-05), under the LA strain row; written only
+        when the volumetry was really done (an LA EDV, SV or EF, or a typed LA ESV): a LAV alone (copied into LA ESV)
+        makes no row."""
+        keys = ("la_edv", "la_esv", "la_sv", "la_ef")
+        if not any(k in self.values and k not in self.calculated for k in ("la_edv", "la_sv", "la_ef")) \
+                and not ("la_esv" in self.values and "la_esv" not in self.calculated):
+            return []
+        return self.strain_row(keys)
+
     def rv_3d(self):
         """'3D: RV EF: 50 %  RV EDV: 120 ml  RV ESV: 60 ml  RV SV: 60 ml' (as the LV: EF EDV ESV SV; the filled
-        values close up), under TAPSE."""
+        values close up), under TAPSE (and under the RV strain row)."""
         cells = [x for x in (self.cell(k) for k in ("rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv")) if x]
         if not cells:
             return []
@@ -961,8 +1023,9 @@ class Report:
                   + self.tdi_lines("med", "medialis"))
         blocks = [
             # Header
-            self.closeup(K["hdr"], [c("hr"), c("tm"), c("ts"), c("bsa")])          # TM before TS (2026-10-08)
-            + self.devices(),
+            self.header_rows()
+            + self.devices() + self.sport()                              # device lines, sport (2026-11-05)
+            + self.free_text(self.texts.get("fejlec")),                  # the header's remark (2026-11-05)
             # Bal kamra
             # one empty row between: the dimensions | the EF row + wall motion | other remarks | E/A, TDI (2026-10-07)
             self.stack(
@@ -976,12 +1039,15 @@ class Report:
             self.row((0, self.pair("rv_edd", "rv_esd", "RV EDD", "RV ESD", "RV EDD/ESD", "/", "mm")),
                      (K["rv"], c("fac")))
             + self.row((0, c("tapse")), (K["rv"], c("tric_smax")))
+            + self.strain_row(("rv_fwls", "rv_sls", "rv_gls"))         # RV strain, above the 3D row (2026-11-05)
             + self.rv_3d()
             + self.free_text(self.texts.get("jobb_kamra")),
             # Pitvarok
             self.row((0, self.pair("la_1", "la_2", "Bal pitvar", "Bal pitvar", "Bal pitvar", "*", "mm")),
                      (K["atria"], self.pair("ra_1", "ra_2", "Jobb pitvar", "Jobb pitvar", "Jobb pitvar", "*", "mm")))
-            + self.row((0, c("lavi")), (K["atria"], c("lares")))         # LAVi first (2026-10-01); LAV: not written (only for LAVi)
+            + self.row((0, c("lavi")))                                   # LAVi first (2026-10-01); LAV: not written (only for LAVi)
+            + self.strain_row(("lares", "la_cd", "la_ct"))               # LA strain: LASr (was LARes), LAScd, LASct (2026-11-05)
+            + self.la_volumes()                                          # LA EDV / ESV / SV / EF (2026-11-05)
             + self.free_text(self.texts.get("pitvarok")),
             # Mitrális billentyű (the valve groups follow the page's cards, 2026-10-01); an empty row between the
             # text + grade line, the regurgitation group (PISA, flow) and the stenosis
@@ -1094,19 +1160,29 @@ class Report:
             x = to_float(value)
             if x is None:
                 continue
-            if x < 0 and key != "gls":
+            if x < 0 and key not in NEGATIVE_STRAIN and key not in ("la_cd", "la_ct"):   # strain: negative is normal
                 self.warn(f"{self.label(key)}: negatív érték ({value}).", key=key)
             if FIELD[key].unit == "%" and x > 100:
                 self.warn(f"{self.label(key)}: 100% feletti érték ({value}).", key=key)
-        if "gls" in self.values and not self.values["gls"].startswith("-"):
-            self.warn(f"GLS: {self.values['gls']} % mínusz nélkül diktálva. Ellenőrizd!", key="gls", level="likely", suggestion="-" + self.values["gls"])
+        for key in NEGATIVE_STRAIN:                 # GLS, RV FWLS / septal / GLS: always negative (the page adds the minus)
+            value = self.values.get(key)
+            if value and to_float(value) is not None and to_float(value) > 0:
+                self.warn(f"{self.label(key)}: {value} % mínusz nélkül diktálva. Ellenőrizd!", key=key, level="likely",
+                          suggestion="-" + value)
+        # LA strain (2026-11-05): conduit + contractile together are about the reservoir strain (signs ignored)
+        r_, cd, ct = (self.num(k) for k in ("lares", "la_cd", "la_ct"))
+        if r_ and cd is not None and ct is not None:
+            total = abs(cd) + abs(ct)
+            if abs(total - abs(r_)) > 0.1 * abs(r_):
+                self.warn(f"LASr: {self.values['lares']} %, de |LAScd| + |LASct| = {fmt(total, 1).removesuffix(',0')} % "
+                          f"(több mint 10% eltérés). Ellenőrizd!", key="lares")
         for key in ("bsa", "av_vti", "a_wave", "tdi_lat_e", "tdi_med_e", "lvot_diam"):
             if self.num(key) == 0:
                 self.warn(f"{self.label(key)}: 0, ezzel nem lehet számolni.", key=key)
         # TDI side missing, device name missing
         for n in ("", "_2", "_3"):                      # every device line needs its name
             if (f"device{n}_flow" in self.values or f"device{n}_rpm" in self.values) and f"device{n}" not in self.values:
-                self.warn("Eszköz flow diktálva, de az eszköz neve (ECMO/LVAD/RVAD) nem.", key=f"device{n}")
+                self.warn("Eszköz flow diktálva, de az eszköz neve (ECMO/LVAD/RVAD/HM) nem.", key=f"device{n}")
 
     def check_texts(self):
         """Free-text safety checks: the AI may rephrase, but not change findings."""
@@ -1203,16 +1279,19 @@ def _pisa(p):
 
 
 FORM_SECTIONS = [
-    ("Fejléc", ["hr", "tm", "ts", "bsa", "device", "device_flow", "device_rpm",
+    ("Fejléc", ["hr", "bp_sys", "bp_dia", "tm", "ts", "bsa", "device", "device_flow", "device_rpm",
                 "device_2", "device_2_flow", "device_2_rpm", "device_3", "device_3_flow", "device_3_rpm",
-                "cvp", "ventilated", "supine", "afib", "pvc", "bedside", "suboptimal"], None, False),
+                "cvp", "ventilated", "supine", "afib", "pvc", "bedside", "suboptimal", "sport", "sport_text"],
+     "fejlec", False),
     ("Bal kamra", ["lv_edd", "lv_esd", "septum", "hatso_fal", "ao_annulus", "sinus_valsalva",
                    "ao_ascendens", "ef", "edv", "esv", "lv_sv", "gls",
                    "lv3d_ef", "lv3d_edv", "lv3d_esv", "lv3d_sv", "e_wave", "a_wave", "ea_ratio", "dt", "l_wave",
                    "tdi_lat_s", "tdi_lat_e", "tdi_lat_a", "tdi_lat_ee",
                    "tdi_med_s", "tdi_med_e", "tdi_med_a", "tdi_med_ee"], "falmozgas", False),
-    ("Jobb kamra", ["rv_edd", "rv_esd", "tapse", "fac", "rv_eda", "rv_esa", "tric_smax", "rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"], "jobb_kamra", False),
-    ("Pitvarok", ["la_1", "la_2", "ra_1", "ra_2", "lares", "lavi", "lav"], "pitvarok", False),
+    ("Jobb kamra", ["rv_edd", "rv_esd", "tapse", "fac", "rv_eda", "rv_esa", "tric_smax", "rv_fwls", "rv_sls", "rv_gls",
+                    "rv3d_ef", "rv3d_edv", "rv3d_esv", "rv3d_sv"], "jobb_kamra", False),
+    ("Pitvarok", ["la_1", "la_2", "ra_1", "ra_2", "lares", "la_cd", "la_ct", "lavi", "lav",
+                  "la_edv", "la_esv", "la_sv", "la_ef"], "pitvarok", False),
     ("Mitrális billentyű", ["mv_morph", "mi", "mr_vc", "vena_pulm_flow", "mv_vti_pw", "mv_lvot_vti", "mv_vti_cw", *_pisa("mr"), "mv_grad", "mva_vti",
                             "mva", "mv_pht", "mva_pht", "mv_peak_e", "mv_dvi", "mv_eoai"], "mitralis", True),
     ("Tricuspidalis billentyű", ["tv_morph", "ti", "pasp_grad", "rap", "ivc_max", "ivc_min", "tr_vc",

@@ -412,7 +412,7 @@ def diastolic_excluded(r):
         return True
     if r.grade_level("mi") >= 3:
         return True                                               # severe (primary) MR
-    if any(r.values.get(k) == "LVAD" for k in ("device", "device_2", "device_3")):
+    if any(r.values.get(k) in ("LVAD", "HM") for k in ("device", "device_2", "device_3")):   # HM = HeartMate, an LVAD
         return True
     if r.values.get("mv_morph") == "műbillentyű":
         return True                                               # mitral prosthesis, picked in the card title
