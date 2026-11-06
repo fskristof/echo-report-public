@@ -18,6 +18,9 @@
                font-weight: 300 800; font-stretch: 75% 100%; font-display: block; }
   html { font-stretch: 95%; }
   input, select, textarea, button { font-family: inherit; font-stretch: inherit; }   /* every box in the same font */
+  /* every dropdown's open list follows light / dark mode (a select with a see-through background otherwise opens a
+     white list in dark mode: the prosthetic valve size, KAEC / KARU) */
+  select option, select optgroup { background: var(--card); color: var(--text); }
   /* ---------- Colours (Apple system palette), light and dark ---------- */
   :root {
     --bg: #f2f2f7; --card: #ffffff; --card-2: #f7f7fa; --edge: rgba(0, 0, 0, .05);
@@ -131,7 +134,6 @@
           background-repeat: no-repeat; background-position: right 10px center; }
   #size:hover { background-color: var(--sep); }
   #size:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-tint), 0 0 0 1px var(--accent); }
-  #size option { background: var(--card); color: var(--text); }
 
   /* ---------- 0. Login ---------- */
   body.on-login .bar { display: none; }
@@ -479,7 +481,6 @@
   .slot select { width: auto; flex: 0 0 auto; appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: right 10px center; }
-  .slot select option { background: var(--card); color: var(--text); }
   /* the regurgitation parts hold 3 columns and severity badges: a little smaller boxes, numbers and badges */
   .sub.tight { --col-gap: 12px; }
   .sub.tight .slot:not(.choice) input { font-size: .875rem; width: 2.75rem; flex-basis: 2.75rem; padding-top: 4.5px; padding-bottom: 4.5px; }
@@ -760,7 +761,7 @@
     .bar { background: var(--bg); }
   }
 </style>
-<meta name="echocore-version" content="03ddb5e, 2026-11-05">
+<meta name="echocore-version" content="c4fbb51, 2026-11-06">
 <script src="pyodide/pyodide.js"></script>
 <script src="static-api.js"></script>
 </head>
